@@ -5,6 +5,11 @@ import (
 	"io"
 )
 
+// A topic's state represents enough information so that the topic
+// can be shut down and re-opened without any loss of data. The state
+// does not have to perfectly reflect the state of the topic. It must
+// merely provide enough information so that we can satisfy the queue's
+// guarantees.
 func saveState(t *Topic) {
 	name := PATH +  t.name + "/state.q"
 	tmp := name + ".tmp"
@@ -28,6 +33,11 @@ func writeUint64(buffer []byte, writer io.Writer, value uint64) {
 	writer.Write(buffer)
 }
 
+// A topic's state doesn't necessarily reflect the final state.
+// The offset of both the topic (write offset) and channels (read offsets)
+// may be behind. In the case of channel offsets, this means we'll potentially
+// send a message more than once. For the write offset, we can skip ahead and
+// find the correct location based on what we have.
 func loadState(t *Topic) bool {
 	root := PATH +  t.name
 	os.MkdirAll(root, 0700)

@@ -45,7 +45,7 @@ func OpenTopic(name string) *Topic {
 func (t *Topic) Write(data []byte) {
 	l := len(data)
 	t.dlock.Lock()
-	if l+t.offset > MAX_QUEUE_SIZE {
+	if l+t.offset+4 > MAX_QUEUE_SIZE {
 		t.expand()
 	}
 	encoder.PutUint32(t.current.data[t.offset:], uint32(l))
