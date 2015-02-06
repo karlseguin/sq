@@ -20,15 +20,17 @@ type Topic struct {
 	offset    int
 	current   *Storage
 	observers []Observer
-	storages  map[int]*Storage
+	storages  map[uint64]*Storage
 }
 
-func NewTopic(name string) *Topic {
+func OpenTopic(name string) *Topic {
 	t := &Topic{
 		name:     name,
-		storages: make(map[int]*Storage),
+		storages: make(map[uint64]*Storage),
 	}
-	t.expand()
+	if loadState(t) == false {
+		t.expand()
+	}
 	return t
 }
 
@@ -52,15 +54,13 @@ func (t *Topic) Write(data []byte) {
 }
 
 func (t *Topic) expand() {
-	index := 0
-	if t.current != nil {
-		index = t.current.index
-	}
-	storage := newStorage(t.name, index)
-	t.storages[storage.index] = storage
+	storage := newStorage(t)
+	t.storages[storage.id] = storage
 	t.current = storage
 	t.offset = 0
+	saveState(t)
 }
+
 
 func (t *Topic) catchup(c *Channel) []byte {
 	//important that this locks get held until we've added the observer
@@ -92,3 +92,4 @@ func (t *Topic) lockedRead(position Position) []byte {
 	end := start + int(l)
 	return t.current.data[start:end]
 }
+
