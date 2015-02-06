@@ -39,8 +39,8 @@ func (c *Channel) Consume(handler Handler) {
 		c.handle(message)
 	}
 
+	c.lock.Lock()
 	for {
-		c.lock.Lock()
 		c.cond.Wait()
 		c.lock.Unlock()
 		for {
@@ -51,8 +51,6 @@ func (c *Channel) Consume(handler Handler) {
 			c.lock.Lock()
 			c.waiting -= 1
 			waiting := c.waiting
-			c.lock.Unlock()
-
 			if waiting == 0 {
 				break
 			}
