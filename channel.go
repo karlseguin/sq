@@ -45,6 +45,9 @@ func (c *Channel) Consume(handler Handler) {
 		c.lock.Unlock()
 		for {
 			message := c.topic.read(c.position)
+			if message == nil {
+				panic("should not happen //todo: handle better")
+			}
 			if c.handle(message) == false {
 				continue
 			}

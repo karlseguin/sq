@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	maxQueueSize = 16384
+	maxQueueSize = 16384 * 4
 )
 
 var (
@@ -19,11 +19,15 @@ var (
 type Topic struct {
 	dlock     sync.RWMutex
 	olock     sync.RWMutex
-	ref       []byte
 	name      string
 	offset    int
-	data      *[maxQueueSize]byte
+	current   Storage
 	observers []Observer
+}
+
+type Storage struct {
+	ref       []byte
+	data      *[maxQueueSize]byte
 }
 
 func NewTopic(name string) *Topic {
@@ -36,22 +40,27 @@ func NewTopic(name string) *Topic {
 		panic(err)
 	}
 	file.Truncate(maxQueueSize)
-	b, err := syscall.Mmap(int(file.Fd()), 0, maxQueueSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	ref, err := syscall.Mmap(int(file.Fd()), 0, maxQueueSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
 		panic(err)
 	}
 
-	t.ref = b
-	t.data = (*[maxQueueSize]byte)(unsafe.Pointer(&b[0]))
+	t.current = Storage{
+		ref: ref,
+		data: (*[maxQueueSize]byte)(unsafe.Pointer(&ref[0])),
+	}
 	return t
 }
 
 func (t *Topic) Write(data []byte) {
 	l := len(data)
 	t.dlock.Lock()
-	encoder.PutUint32(t.data[t.offset:], uint32(l))
+	if l + t.offset > maxQueueSize {
+		t.expand()
+	}
+	encoder.PutUint32(t.current.data[t.offset:], uint32(l))
 	t.offset += 4
-	copy(t.data[t.offset:], data)
+	copy(t.current.data[t.offset:], data)
 	t.offset += l
 	t.dlock.Unlock()
 
@@ -60,6 +69,10 @@ func (t *Topic) Write(data []byte) {
 	for _, o := range t.observers {
 		o.Notify()
 	}
+}
+
+func (t *Topic) expand() {
+	// t.
 }
 
 func (t *Topic) catchup(c *Channel) []byte {
@@ -87,8 +100,8 @@ func (t *Topic) lockedRead(position Position) []byte {
 		return nil
 	}
 
-	l := encoder.Uint32(t.data[position.offset:])
+	l := encoder.Uint32(t.current.data[position.offset:])
 	start := position.offset + 4
 	end := start + int(l)
-	return t.data[start:end]
+	return t.current.data[start:end]
 }
