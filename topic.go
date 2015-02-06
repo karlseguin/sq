@@ -2,14 +2,11 @@ package garbage4
 
 import (
 	"encoding/binary"
-	"os"
 	"sync"
-	"syscall"
-	"unsafe"
 )
 
 const (
-	maxQueueSize = 16384 * 4
+	maxQueueSize = 16384
 )
 
 var (
@@ -21,41 +18,24 @@ type Topic struct {
 	olock     sync.RWMutex
 	name      string
 	offset    int
-	current   Storage
+	current   *Storage
 	observers []Observer
-}
-
-type Storage struct {
-	ref       []byte
-	data      *[maxQueueSize]byte
+	storages  map[int]*Storage
 }
 
 func NewTopic(name string) *Topic {
 	t := &Topic{
-		name: name,
+		name:     name,
+		storages: make(map[int]*Storage),
 	}
-
-	file, err := os.OpenFile(name+".q", os.O_RDWR|os.O_CREATE, 0600)
-	if err != nil {
-		panic(err)
-	}
-	file.Truncate(maxQueueSize)
-	ref, err := syscall.Mmap(int(file.Fd()), 0, maxQueueSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
-	if err != nil {
-		panic(err)
-	}
-
-	t.current = Storage{
-		ref: ref,
-		data: (*[maxQueueSize]byte)(unsafe.Pointer(&ref[0])),
-	}
+	t.expand()
 	return t
 }
 
 func (t *Topic) Write(data []byte) {
 	l := len(data)
 	t.dlock.Lock()
-	if l + t.offset > maxQueueSize {
+	if l+t.offset > maxQueueSize {
 		t.expand()
 	}
 	encoder.PutUint32(t.current.data[t.offset:], uint32(l))
@@ -72,7 +52,14 @@ func (t *Topic) Write(data []byte) {
 }
 
 func (t *Topic) expand() {
-	// t.
+	index := 0
+	if t.current != nil {
+		index = t.current.index
+	}
+	storage := newStorage(t.name, index)
+	t.storages[storage.index] = storage
+	t.current = storage
+	t.offset = 0
 }
 
 func (t *Topic) catchup(c *Channel) []byte {
