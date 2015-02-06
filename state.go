@@ -6,7 +6,7 @@ import (
 )
 
 func saveState(t *Topic) {
-	name := "data/" + t.name
+	name := PATH +  t.name + "/state.q"
 	tmp := name + ".tmp"
 	file, err := os.OpenFile(tmp, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0600)
 	if err != nil {
@@ -29,7 +29,9 @@ func writeUint64(buffer []byte, writer io.Writer, value uint64) {
 }
 
 func loadState(t *Topic) bool {
-	file, err := os.Open("data/" + t.name)
+	root := PATH +  t.name
+	os.MkdirAll(root, 0700)
+	file, err := os.Open(root + "/state.q")
 	if os.IsNotExist(err) {
 		return false
 	}
@@ -42,7 +44,7 @@ func loadState(t *Topic) bool {
 	offset := readUint64(buffer, file)
 	t.current = storage
 
-	end := uint64(maxQueueSize - 4)
+	end := uint64(MAX_QUEUE_SIZE - 4)
 	for offset < end {
 		l := encoder.Uint32(storage.data[offset:])
 		if l == 0 {

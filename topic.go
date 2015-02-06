@@ -3,15 +3,23 @@ package garbage4
 import (
 	"encoding/binary"
 	"sync"
+	"os"
 )
 
 const (
-	maxQueueSize = 16384
+	MAX_QUEUE_SIZE = 16384
 )
 
 var (
+	PATH = "/tmp/q/"
 	encoder = binary.BigEndian
 )
+
+func init() {
+	if err := os.MkdirAll(PATH, 0700); err != nil {
+		panic(err)
+	}
+}
 
 type Topic struct {
 	dlock     sync.RWMutex
@@ -37,7 +45,7 @@ func OpenTopic(name string) *Topic {
 func (t *Topic) Write(data []byte) {
 	l := len(data)
 	t.dlock.Lock()
-	if l+t.offset > maxQueueSize {
+	if l+t.offset > MAX_QUEUE_SIZE {
 		t.expand()
 	}
 	encoder.PutUint32(t.current.data[t.offset:], uint32(l))
