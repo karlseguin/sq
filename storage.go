@@ -39,3 +39,9 @@ func openStorage(t *Topic, id uint64) *Storage {
 		data:  (*[MAX_QUEUE_SIZE]byte)(unsafe.Pointer(&ref[0])),
 	}
 }
+
+func (s *Storage) Close() {
+	syscall.Munmap(s.ref)
+	s.file.Close()
+	s.data, s.ref = nil, nil
+}
