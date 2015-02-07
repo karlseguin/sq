@@ -25,14 +25,14 @@ func newChannel(topic *Topic) *Channel {
 }
 
 func (c *Channel) Consume(handler Handler) {
-	// c.handler = handler
-	// for {
-	// 	message := c.topic.catchup(c)
-	// 	if message == nil {
-	// 		break
-	// 	}
-	// 	c.handle(message)
-	// }
+	c.handler = handler
+	for {
+		message := c.topic.read(c.position)
+		if message == nil {
+			break
+		}
+		c.handle(message)
+	}
 
 	c.lock.Lock()
 	for {
@@ -65,7 +65,7 @@ func (c *Channel) handle(message []byte) bool {
 	return true
 }
 
-func (c *Channel) Notify() {
+func (c *Channel) notify() {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.waiting += 1

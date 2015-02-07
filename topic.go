@@ -109,46 +109,26 @@ func (t *Topic) worker() {
 					c.position.offset = t.position.offset
 					c.position.segmentId = t.position.segmentId
 					t.dataLock.RUnlock()
-					t.channels[name] = c
-				} else {
-					//i don't know
 				}
+				t.channels[name] = c
 			}
 			t.channelAdded <- c
 		case <-t.messageAdded:
 			for _, c := range t.channels {
-				c.Notify()
+				c.notify()
 			}
 		}
 	}
 }
 
-func (t *Topic) catchup(c *Channel) []byte {
-	// //important that this locks get held until we've added the observer
-	// t.dataLock.RLock()
-	// defer t.dataLock.RUnlock()
-
-	// if message := t.dataLockedRead(c.position); message != nil {
-	// 	return message
-	// }
-	return nil
-}
-
 func (t *Topic) read(position *Position) []byte {
 	t.dataLock.RLock()
 	defer t.dataLock.RUnlock()
-	return t.lockedRead(position)
-	return nil
-}
-
-func (t *Topic) lockedRead(position *Position) []byte {
 	if position.offset >= t.position.offset {
 		return nil
 	}
-
 	l := encoder.Uint32(t.segment.data[position.offset:])
 	start := position.offset + 4
 	end := start + int(l)
 	return t.segment.data[start:end]
-	return nil
 }
