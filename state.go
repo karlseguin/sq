@@ -19,10 +19,10 @@ func saveState(t *Topic, full bool) {
 	}
 
 	buffer := make([]byte, 8)
-	writeUint64(buffer, file, uint64(t.current.id))
+	writeUint64(buffer, file, uint64(t.segment.id))
 	writeUint64(buffer, file, uint64(t.offset))
 	if full {
-
+		// for
 	}
 	file.Close()
 	if err := os.Rename(tmp, name); err != nil {
@@ -52,13 +52,12 @@ func loadState(t *Topic) bool {
 	}
 	defer file.Close()
 	buffer := make([]byte, 8)
-	storage := openStorage(t, readUint64(buffer, file))
+	t.segment = openSegment(t, readUint64(buffer, file))
 	offset := readUint64(buffer, file)
-	t.current = storage
 
 	end := uint64(MAX_QUEUE_SIZE - 4)
 	for offset < end {
-		l := encoder.Uint32(storage.data[offset:])
+		l := encoder.Uint32(t.segment.data[offset:])
 		if l == 0 {
 			break
 		}

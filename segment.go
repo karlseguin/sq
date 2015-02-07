@@ -8,20 +8,20 @@ import (
 	"unsafe"
 )
 
-type Storage struct {
+type Segment struct {
 	id   uint64
 	ref  []byte
 	file *os.File
 	data *[MAX_QUEUE_SIZE]byte
 }
 
-func newStorage(t *Topic) *Storage {
-	storage := openStorage(t, uint64(time.Now().UnixNano()))
-	storage.file.Truncate(MAX_QUEUE_SIZE)
-	return storage
+func newSegment(t *Topic) *Segment {
+	segment := openSegment(t, uint64(time.Now().UnixNano()))
+	segment.file.Truncate(MAX_QUEUE_SIZE)
+	return segment
 }
 
-func openStorage(t *Topic, id uint64) *Storage {
+func openSegment(t *Topic, id uint64) *Segment {
 	name := PATH + t.name + "/" + strconv.FormatUint(id, 10) + ".q"
 	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
@@ -32,7 +32,7 @@ func openStorage(t *Topic, id uint64) *Storage {
 		panic(err)
 	}
 
-	return &Storage{
+	return &Segment{
 		id:   id,
 		ref:  ref,
 		file: file,
@@ -40,7 +40,7 @@ func openStorage(t *Topic, id uint64) *Storage {
 	}
 }
 
-func (s *Storage) Close() {
+func (s *Segment) Close() {
 	syscall.Munmap(s.ref)
 	s.file.Close()
 	s.data, s.ref = nil, nil

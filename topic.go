@@ -25,12 +25,16 @@ func init() {
 }
 
 type Topic struct {
-	lock         sync.RWMutex
-	name         string
-	offset       int
-	current      *Storage
-	channels     []*Channel
-	storages     map[uint64]*Storage
+	lock sync.RWMutex
+	name string
+
+	allChannels    map[string]*Channel
+	activeChannels []*Channel
+
+	offset   int
+	segment  *Segment
+	segments map[uint64]*Segment
+
 	channelAdded chan *Channel
 	messageAdded chan struct{}
 }
@@ -38,13 +42,14 @@ type Topic struct {
 func OpenTopic(name string) *Topic {
 	t := &Topic{
 		name:         name,
-		storages:     make(map[uint64]*Storage),
+		segments:     make(map[uint64]*Segment),
 		channelAdded: make(chan *Channel),
 		messageAdded: make(chan struct{}),
 	}
 	if loadState(t) == false {
 		t.expand()
 	}
+	go t.worker()
 	return t
 }
 
@@ -54,9 +59,9 @@ func (t *Topic) Write(data []byte) {
 	if t.offset+4 > MAX_QUEUE_SIZE {
 		t.expand()
 	}
-	encoder.PutUint32(t.current.data[t.offset:], uint32(l))
+	encoder.PutUint32(t.segment.data[t.offset:], uint32(l))
 	t.offset += 4
-	copy(t.current.data[t.offset:], data)
+	copy(t.segment.data[t.offset:], data)
 	t.offset += l
 	t.lock.Unlock()
 	t.messageAdded <- blank
@@ -66,7 +71,7 @@ func (t *Topic) Channel(name string) *Channel {
 	c := newChannel(t)
 	t.lock.RLock()
 	c.position = Position{
-		id:     t.current.id,
+		id:     t.segment.id,
 		offset: t.offset,
 	}
 	t.lock.RUnlock()
@@ -75,9 +80,9 @@ func (t *Topic) Channel(name string) *Channel {
 }
 
 func (t *Topic) expand() {
-	storage := newStorage(t)
-	t.storages[storage.id] = storage
-	t.current = storage
+	segment := newSegment(t)
+	t.segments[segment.id] = segment
+	t.segment = segment
 	t.offset = 0
 	saveState(t, false)
 }
@@ -87,9 +92,9 @@ func (t *Topic) worker() {
 	for {
 		select {
 		case c := <-t.channelAdded:
-			t.channels = append(t.channels, c)
+			t.activeChannels = append(t.activeChannels, c)
 		case <-t.messageAdded:
-			for _, c := range t.channels {
+			for _, c := range t.activeChannels {
 				c.Notify()
 			}
 		case <-timer.C:
@@ -123,8 +128,8 @@ func (t *Topic) lockedRead(position Position) []byte {
 		return nil
 	}
 
-	l := encoder.Uint32(t.current.data[position.offset:])
+	l := encoder.Uint32(t.segment.data[position.offset:])
 	start := position.offset + 4
 	end := start + int(l)
-	return t.current.data[start:end]
+	return t.segment.data[start:end]
 }
