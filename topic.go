@@ -115,8 +115,27 @@ func (t *Topic) worker() {
 			t.channelAdded <- c
 		case <-t.messageAdded:
 			for _, c := range t.channels {
-				c.notify()
+				c.notify(1)
 			}
+		}
+	}
+}
+
+func (t *Topic) align(c *Channel) bool {
+	t.dataLock.Lock()
+	defer t.dataLock.Unlock()
+	if t.lockedRead(c.position) != nil {
+		return false
+	}
+	count := 0
+	for {
+		select {
+		case <- t.messageAdded:
+			count++
+		default:
+			c.notify(count)
+			c.aligned()
+			return true
 		}
 	}
 }
@@ -124,6 +143,10 @@ func (t *Topic) worker() {
 func (t *Topic) read(position *Position) []byte {
 	t.dataLock.RLock()
 	defer t.dataLock.RUnlock()
+	return t.lockedRead(position)
+}
+
+func (t *Topic) lockedRead(position *Position) []byte {
 	if position.offset >= t.position.offset {
 		return nil
 	}

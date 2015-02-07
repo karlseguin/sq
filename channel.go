@@ -28,7 +28,7 @@ func (c *Channel) Consume(handler Handler) {
 	c.handler = handler
 	for {
 		message := c.topic.read(c.position)
-		if message == nil {
+		if message == nil && c.topic.align(c) {
 			break
 		}
 		c.handle(message)
@@ -65,9 +65,15 @@ func (c *Channel) handle(message []byte) bool {
 	return true
 }
 
-func (c *Channel) notify() {
+func (c *Channel) notify(count int) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	c.waiting += 1
+	c.waiting += count
 	c.cond.Signal()
+}
+
+func (c *Channel) aligned() {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.waiting = 0
 }
