@@ -72,8 +72,3 @@ func (c *Channel) Notify() {
 	c.waiting += 1
 	c.cond.Signal()
 }
-
-type Position struct {
-	id     uint64
-	offset int
-}
