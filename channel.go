@@ -9,7 +9,7 @@ type Handler func(message []byte) error
 
 type Channel struct {
 	topic    *Topic
-	position Position
+	position *Position
 	lock     sync.Mutex
 	cond     *sync.Cond
 	handler  Handler
@@ -18,22 +18,21 @@ type Channel struct {
 
 func newChannel(topic *Topic) *Channel {
 	c := &Channel{
-		topic:    topic,
-		position: Position{},
+		topic: topic,
 	}
 	c.cond = &sync.Cond{L: &c.lock}
 	return c
 }
 
 func (c *Channel) Consume(handler Handler) {
-	c.handler = handler
-	for {
-		message := c.topic.catchup(c)
-		if message == nil {
-			break
-		}
-		c.handle(message)
-	}
+	// c.handler = handler
+	// for {
+	// 	message := c.topic.catchup(c)
+	// 	if message == nil {
+	// 		break
+	// 	}
+	// 	c.handle(message)
+	// }
 
 	c.lock.Lock()
 	for {

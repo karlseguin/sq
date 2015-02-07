@@ -9,9 +9,11 @@ import (
 const MAX_STATE_SIZE = 32768
 
 type State struct {
-	ref  []byte
-	file *os.File
-	data *[MAX_STATE_SIZE]byte
+	ref      []byte
+	file     *os.File
+	offset   int
+	data     *[MAX_STATE_SIZE]byte
+	channels map[string]int
 }
 
 type Position struct {
@@ -44,15 +46,45 @@ func loadState(t *Topic) (*State, error) {
 	}
 
 	state := &State{
-		ref:  ref,
-		file: file,
-		data: (*[MAX_STATE_SIZE]byte)(unsafe.Pointer(&ref[0])),
+		ref:      ref,
+		file:     file,
+		channels: make(map[string]int),
+		data:     (*[MAX_STATE_SIZE]byte)(unsafe.Pointer(&ref[0])),
 	}
+
+	start, end := 16, 16
+	for {
+		if state.data[end] == 0 {
+			if end == start {
+				break
+			}
+			offset := end + 1
+			state.channels[string(state.data[start:end])] = offset
+			start = offset + 16
+			end = start
+		} else {
+			end++
+		}
+	}
+	state.offset = end
 	return state, nil
 }
 
-func (s *State) LoadPosition(offset int) *Position {
+func (s *State) loadPosition(offset int) *Position {
 	return (*Position)(unsafe.Pointer(&s.data[offset]))
+}
+
+func (s *State) loadOrCreatePosition(name string) *Position {
+	offset, exists := s.channels[name]
+	if exists == false {
+		//todo check for overflow
+		//todo compact
+		s.offset += copy(s.data[s.offset:], name)
+		s.data[s.offset] = 0
+		offset = s.offset + 1
+		s.offset += 17
+	}
+	return s.loadPosition(offset)
 }
 
 func (s *State) Close() {
