@@ -2,8 +2,8 @@ package garbage4
 
 import (
 	"encoding/binary"
-	"sync"
 	"os"
+	"sync"
 )
 
 const (
@@ -11,7 +11,7 @@ const (
 )
 
 var (
-	PATH = "/tmp/q/"
+	PATH    = "/tmp/q/"
 	encoder = binary.BigEndian
 )
 
@@ -69,7 +69,6 @@ func (t *Topic) expand() {
 	saveState(t)
 }
 
-
 func (t *Topic) catchup(c *Channel) []byte {
 	//important that this locks get held until we've added the observer
 	t.dlock.RLock()
@@ -100,4 +99,3 @@ func (t *Topic) lockedRead(position Position) []byte {
 	end := start + int(l)
 	return t.current.data[start:end]
 }
-

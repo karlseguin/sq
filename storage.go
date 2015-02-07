@@ -4,15 +4,15 @@ import (
 	"os"
 	"strconv"
 	"syscall"
-	"unsafe"
 	"time"
+	"unsafe"
 )
 
 type Storage struct {
-	id    uint64
-	ref   []byte
-	file  *os.File
-	data  *[MAX_QUEUE_SIZE]byte
+	id   uint64
+	ref  []byte
+	file *os.File
+	data *[MAX_QUEUE_SIZE]byte
 }
 
 func newStorage(t *Topic) *Storage {
@@ -22,7 +22,7 @@ func newStorage(t *Topic) *Storage {
 }
 
 func openStorage(t *Topic, id uint64) *Storage {
-	name := PATH +  t.name + "/" + strconv.FormatUint(id, 10) + ".q"
+	name := PATH + t.name + "/" + strconv.FormatUint(id, 10) + ".q"
 	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)
@@ -33,10 +33,10 @@ func openStorage(t *Topic, id uint64) *Storage {
 	}
 
 	return &Storage{
-		id: id,
-		ref:   ref,
-		file:  file,
-		data:  (*[MAX_QUEUE_SIZE]byte)(unsafe.Pointer(&ref[0])),
+		id:   id,
+		ref:  ref,
+		file: file,
+		data: (*[MAX_QUEUE_SIZE]byte)(unsafe.Pointer(&ref[0])),
 	}
 }
 

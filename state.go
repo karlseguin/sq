@@ -1,8 +1,8 @@
 package garbage4
 
 import (
-	"os"
 	"io"
+	"os"
 )
 
 // A topic's state represents enough information so that the topic
@@ -11,9 +11,9 @@ import (
 // merely provide enough information so that we can satisfy the queue's
 // guarantees.
 func saveState(t *Topic) {
-	name := PATH +  t.name + "/state.q"
+	name := PATH + t.name + "/state.q"
 	tmp := name + ".tmp"
-	file, err := os.OpenFile(tmp, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0600)
+	file, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		panic(err)
 	}
@@ -39,7 +39,7 @@ func writeUint64(buffer []byte, writer io.Writer, value uint64) {
 // send a message more than once. For the write offset, we can skip ahead and
 // find the correct location based on what we have.
 func loadState(t *Topic) bool {
-	root := PATH +  t.name
+	root := PATH + t.name
 	os.MkdirAll(root, 0700)
 	file, err := os.Open(root + "/state.q")
 	if os.IsNotExist(err) {
