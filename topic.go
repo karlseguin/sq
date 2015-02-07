@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"os"
 	"sync"
+	"time"
 )
 
 const (
@@ -11,8 +12,10 @@ const (
 )
 
 var (
-	PATH    = "/tmp/q/"
-	encoder = binary.BigEndian
+	PATH       = "/tmp/q/"
+	SYNC_DELAY = time.Millisecond * 1000
+	encoder    = binary.BigEndian
+	blank      = struct{}{}
 )
 
 func init() {
@@ -22,19 +25,22 @@ func init() {
 }
 
 type Topic struct {
-	dlock     sync.RWMutex
-	olock     sync.RWMutex
-	name      string
-	offset    int
-	current   *Storage
-	observers []Observer
-	storages  map[uint64]*Storage
+	lock         sync.RWMutex
+	name         string
+	offset       int
+	current      *Storage
+	channels     []*Channel
+	storages     map[uint64]*Storage
+	channelAdded chan *Channel
+	messageAdded chan struct{}
 }
 
 func OpenTopic(name string) *Topic {
 	t := &Topic{
-		name:     name,
-		storages: make(map[uint64]*Storage),
+		name:         name,
+		storages:     make(map[uint64]*Storage),
+		channelAdded: make(chan *Channel),
+		messageAdded: make(chan struct{}),
 	}
 	if loadState(t) == false {
 		t.expand()
@@ -44,21 +50,28 @@ func OpenTopic(name string) *Topic {
 
 func (t *Topic) Write(data []byte) {
 	l := len(data)
-	t.dlock.Lock()
-	if l+t.offset+4 > MAX_QUEUE_SIZE {
+	t.lock.Lock()
+	if t.offset+4 > MAX_QUEUE_SIZE {
 		t.expand()
 	}
 	encoder.PutUint32(t.current.data[t.offset:], uint32(l))
 	t.offset += 4
 	copy(t.current.data[t.offset:], data)
 	t.offset += l
-	t.dlock.Unlock()
+	t.lock.Unlock()
+	t.messageAdded <- blank
+}
 
-	t.olock.RLock()
-	defer t.olock.RUnlock()
-	for _, o := range t.observers {
-		o.Notify()
+func (t *Topic) Channel(name string) *Channel {
+	c := newChannel(t)
+	t.lock.RLock()
+	c.position = Position{
+		id:     t.current.id,
+		offset: t.offset,
 	}
+	t.lock.RUnlock()
+	t.channelAdded <- c
+	return c
 }
 
 func (t *Topic) expand() {
@@ -66,26 +79,42 @@ func (t *Topic) expand() {
 	t.storages[storage.id] = storage
 	t.current = storage
 	t.offset = 0
-	saveState(t)
+	saveState(t, false)
+}
+
+func (t *Topic) worker() {
+	timer := time.NewTimer(SYNC_DELAY)
+	for {
+		select {
+		case c := <-t.channelAdded:
+			t.channels = append(t.channels, c)
+		case <-t.messageAdded:
+			for _, c := range t.channels {
+				c.Notify()
+			}
+		case <-timer.C:
+			t.lock.RLock()
+			saveState(t, true)
+			t.lock.RUnlock()
+			timer.Reset(SYNC_DELAY)
+		}
+	}
 }
 
 func (t *Topic) catchup(c *Channel) []byte {
 	//important that this locks get held until we've added the observer
-	t.dlock.RLock()
-	defer t.dlock.RUnlock()
+	t.lock.RLock()
+	defer t.lock.RUnlock()
 
 	if message := t.lockedRead(c.position); message != nil {
 		return message
 	}
-	t.olock.Lock()
-	defer t.olock.Unlock()
-	t.observers = append(t.observers, c)
 	return nil
 }
 
 func (t *Topic) read(position Position) []byte {
-	t.dlock.RLock()
-	defer t.dlock.RUnlock()
+	t.lock.RLock()
+	defer t.lock.RUnlock()
 	return t.lockedRead(position)
 }
 

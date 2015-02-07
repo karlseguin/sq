@@ -7,10 +7,6 @@ import (
 
 type Handler func(message []byte) error
 
-type Observer interface {
-	Notify()
-}
-
 type Channel struct {
 	topic    *Topic
 	position Position
@@ -20,7 +16,7 @@ type Channel struct {
 	waiting  int
 }
 
-func NewChannel(topic *Topic) *Channel {
+func newChannel(topic *Topic) *Channel {
 	c := &Channel{
 		topic:    topic,
 		position: Position{},
@@ -78,5 +74,6 @@ func (c *Channel) Notify() {
 }
 
 type Position struct {
+	id     uint64
 	offset int
 }

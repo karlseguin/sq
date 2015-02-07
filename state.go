@@ -10,7 +10,7 @@ import (
 // does not have to perfectly reflect the state of the topic. It must
 // merely provide enough information so that we can satisfy the queue's
 // guarantees.
-func saveState(t *Topic) {
+func saveState(t *Topic, full bool) {
 	name := PATH + t.name + "/state.q"
 	tmp := name + ".tmp"
 	file, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
@@ -21,8 +21,10 @@ func saveState(t *Topic) {
 	buffer := make([]byte, 8)
 	writeUint64(buffer, file, uint64(t.current.id))
 	writeUint64(buffer, file, uint64(t.offset))
-	file.Close()
+	if full {
 
+	}
+	file.Close()
 	if err := os.Rename(tmp, name); err != nil {
 		panic(err)
 	}
