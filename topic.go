@@ -26,7 +26,7 @@ func init() {
 }
 
 type Topic struct {
-	sync.Mutex
+	sync.RWMutex
 	dataLock     sync.RWMutex
 	name         string
 	state        *State
@@ -36,7 +36,7 @@ type Topic struct {
 	segments     map[uint64]*Segment
 	addChannel   chan string
 	channelAdded chan *Channel
-	messageAdded chan struct{}
+	messageAdded chan uint32
 }
 
 func OpenTopic(name string) (*Topic, error) {
@@ -46,7 +46,7 @@ func OpenTopic(name string) (*Topic, error) {
 		segments:     make(map[uint64]*Segment),
 		addChannel:   make(chan string),
 		channelAdded: make(chan *Channel),
-		messageAdded: make(chan struct{}),
+		messageAdded: make(chan uint32),
 	}
 	state, err := loadState(t)
 	if err != nil {
@@ -57,8 +57,9 @@ func OpenTopic(name string) (*Topic, error) {
 	t.position = state.loadPosition(0)
 	if id := t.position.segmentId; id == 0 {
 		t.expand()
+
 	} else {
-		t.segment = openSegment(t, id)
+		t.segment = openSegment(t, id, false)
 		t.segments[id] = t.segment
 	}
 	go t.worker()
@@ -68,17 +69,17 @@ func OpenTopic(name string) (*Topic, error) {
 func (t *Topic) Write(data []byte) {
 	l := len(data)
 	t.dataLock.Lock()
-	offset := t.position.offset
+	offset := int(t.position.offset)
 	if offset+4+l > MAX_QUEUE_SIZE {
 		t.expand()
-		offset = 0
+		offset = SEGMENT_HEADER_SIZE
 	}
 	encoder.PutUint32(t.segment.data[offset:], uint32(l))
 	offset += 4
 	copy(t.segment.data[offset:], data)
-	t.position.offset = offset + l
+	t.position.offset = uint32(offset + l)
 	t.dataLock.Unlock()
-	t.messageAdded <- blank
+	t.messageAdded <- uint32(l + 4)
 }
 
 func (t *Topic) Channel(name string) *Channel {
@@ -88,10 +89,13 @@ func (t *Topic) Channel(name string) *Channel {
 
 func (t *Topic) expand() {
 	segment := newSegment(t)
-	t.segments[segment.id] = segment
+	t.segments[segment.header.id] = segment
+	if t.segment != nil {
+		t.segment.header.nextId = segment.header.id
+	}
 	t.segment = segment
-	t.position.offset = 0
-	t.position.segmentId = segment.id
+	t.position.offset = SEGMENT_HEADER_SIZE
+	t.position.segmentId = segment.header.id
 }
 
 func (t *Topic) worker() {
@@ -115,12 +119,13 @@ func (t *Topic) worker() {
 				t.Unlock()
 			}
 			t.channelAdded <- c
-		case <-t.messageAdded:
-			t.Lock()
+		case l := <-t.messageAdded:
+			t.RLock()
+			t.segment.header.size += l
 			for _, c := range t.channels {
 				c.notify(1)
 			}
-			t.Unlock()
+			t.RUnlock()
 		}
 	}
 }
@@ -131,13 +136,15 @@ func (t *Topic) align(c *Channel) bool {
 	if t.lockedRead(c.position) != nil {
 		return false
 	}
-	count := 0
+	total, count := uint32(0), 0
 	for {
 		select {
-		case <-t.messageAdded:
+		case l := <-t.messageAdded:
 			count++
+			total += l
 		default:
 			t.Lock()
+			t.segment.header.size += total
 			for _, c := range t.channels {
 				c.notify(count)
 			}
@@ -155,11 +162,40 @@ func (t *Topic) read(position *Position) []byte {
 }
 
 func (t *Topic) lockedRead(position *Position) []byte {
-	if position.offset >= t.position.offset {
-		return nil
+	segment := t.segment
+	if position.segmentId == segment.header.id {
+		if position.offset >= t.position.offset {
+			return nil
+		}
+	} else {
+		segment = t.loadSegment(position.segmentId)
+		if position.offset >= segment.header.size {
+			segment = t.loadSegment(segment.header.nextId)
+			position.segmentId = segment.header.id
+			position.offset = SEGMENT_HEADER_SIZE
+		}
 	}
-	l := encoder.Uint32(t.segment.data[position.offset:])
+
+	l := encoder.Uint32(segment.data[position.offset:])
 	start := position.offset + 4
-	end := start + int(l)
-	return t.segment.data[start:end]
+	end := start + uint32(l)
+	return segment.data[start:end]
+}
+
+func (t *Topic) loadSegment(id uint64) *Segment {
+	t.RLock()
+	segment := t.segments[id]
+	t.RUnlock()
+	if segment != nil {
+		return segment
+	}
+	t.Lock()
+	defer t.Unlock()
+	segment = t.segments[id]
+	if segment != nil {
+		return segment
+	}
+	segment = openSegment(t, id, false)
+	t.segments[id] = segment
+	return segment
 }

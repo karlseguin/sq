@@ -61,7 +61,7 @@ func (c *Channel) handle(message []byte) bool {
 		time.Sleep(time.Second) //todo: better
 		return false
 	}
-	c.position.offset += len(message) + 4
+	c.position.offset += uint32(len(message) + 4)
 	return true
 }
 
