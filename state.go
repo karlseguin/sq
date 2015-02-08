@@ -22,7 +22,11 @@ type Position struct {
 }
 
 func loadState(t *Topic) (*State, error) {
-	path := PATH + t.name + "/state.q"
+	root := PATH + t.name
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return nil, err
+	}
+	path := root + "/state.q"
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		return nil, err

@@ -110,13 +110,17 @@ func (t *Topic) worker() {
 					c.position.segmentId = t.position.segmentId
 					t.dataLock.RUnlock()
 				}
+				t.Lock()
 				t.channels[name] = c
+				t.Unlock()
 			}
 			t.channelAdded <- c
 		case <-t.messageAdded:
+			t.Lock()
 			for _, c := range t.channels {
 				c.notify(1)
 			}
+			t.Unlock()
 		}
 	}
 }
@@ -130,10 +134,14 @@ func (t *Topic) align(c *Channel) bool {
 	count := 0
 	for {
 		select {
-		case <- t.messageAdded:
+		case <-t.messageAdded:
 			count++
 		default:
-			c.notify(count)
+			t.Lock()
+			for _, c := range t.channels {
+				c.notify(count)
+			}
+			t.Unlock()
 			c.aligned()
 			return true
 		}
