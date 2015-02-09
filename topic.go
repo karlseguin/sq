@@ -9,13 +9,13 @@ import (
 )
 
 const (
-	MAX_QUEUE_SIZE = 16384
+	MAX_QUEUE_SIZE = 256
 )
 
 var (
 	PATH       = "/tmp/q/"
 	SYNC_DELAY = time.Millisecond * 1000
-	encoder    = binary.BigEndian
+	encoder    = binary.LittleEndian
 	blank      = struct{}{}
 )
 
@@ -57,7 +57,6 @@ func OpenTopic(name string) (*Topic, error) {
 	t.position = state.loadPosition(0)
 	if id := t.position.segmentId; id == 0 {
 		t.expand()
-
 	} else {
 		t.segment = openSegment(t, id, false)
 		t.segments[id] = t.segment
