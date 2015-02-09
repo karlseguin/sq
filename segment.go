@@ -11,13 +11,13 @@ import (
 const SEGMENT_HEADER_SIZE = 28
 
 type Segment struct {
-	header *SegmentHeader
+	*Header
 	ref    []byte
 	file   *os.File
 	data   *[MAX_QUEUE_SIZE]byte
 }
 
-type SegmentHeader struct {
+type Header struct {
 	version uint32
 	flag    uint32
 	size    uint32
@@ -28,7 +28,7 @@ type SegmentHeader struct {
 func newSegment(t *Topic) *Segment {
 	id := uint64(time.Now().UnixNano())
 	segment := openSegment(t, id, true)
-	segment.header.id = id
+	segment.id = id
 	return segment
 }
 
@@ -51,8 +51,8 @@ func openSegment(t *Topic, id uint64, truncate bool) *Segment {
 		file: file,
 		data: (*[MAX_QUEUE_SIZE]byte)(unsafe.Pointer(&ref[0])),
 	}
-	s.header = (*SegmentHeader)(unsafe.Pointer(&s.data[0]))
-	s.header.size = SEGMENT_HEADER_SIZE
+	s.Header = (*Header)(unsafe.Pointer(&s.data[0]))
+	s.size = SEGMENT_HEADER_SIZE
 	return s
 }
 

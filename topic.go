@@ -89,13 +89,13 @@ func (t *Topic) Channel(name string) *Channel {
 
 func (t *Topic) expand() {
 	segment := newSegment(t)
-	t.segments[segment.header.id] = segment
+	t.segments[segment.id] = segment
 	if t.segment != nil {
-		t.segment.header.nextId = segment.header.id
+		t.segment.nextId = segment.id
 	}
 	t.segment = segment
 	t.position.offset = SEGMENT_HEADER_SIZE
-	t.position.segmentId = segment.header.id
+	t.position.segmentId = segment.id
 }
 
 func (t *Topic) worker() {
@@ -121,7 +121,7 @@ func (t *Topic) worker() {
 			t.channelAdded <- c
 		case l := <-t.messageAdded:
 			t.RLock()
-			t.segment.header.size += l
+			t.segment.size += l
 			for _, c := range t.channels {
 				c.notify(1)
 			}
@@ -144,7 +144,7 @@ func (t *Topic) align(c *Channel) bool {
 			total += l
 		default:
 			t.Lock()
-			t.segment.header.size += total
+			t.segment.size += total
 			for _, c := range t.channels {
 				c.notify(count)
 			}
@@ -163,15 +163,15 @@ func (t *Topic) read(position *Position) []byte {
 
 func (t *Topic) lockedRead(position *Position) []byte {
 	segment := t.segment
-	if position.segmentId == segment.header.id {
+	if position.segmentId == segment.id {
 		if position.offset >= t.position.offset {
 			return nil
 		}
 	} else {
 		segment = t.loadSegment(position.segmentId)
-		if position.offset >= segment.header.size {
-			segment = t.loadSegment(segment.header.nextId)
-			position.segmentId = segment.header.id
+		if position.offset >= segment.size {
+			segment = t.loadSegment(segment.nextId)
+			position.segmentId = segment.id
 			position.offset = SEGMENT_HEADER_SIZE
 		}
 	}
