@@ -2,7 +2,6 @@ package garbage4
 
 import (
 	"encoding/binary"
-	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -94,7 +93,6 @@ func (t *Topic) Write(data []byte) error {
 	to := start4 + l - from
 	_, _, errno := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&t.segment.data[from])), uintptr(to), syscall.MS_SYNC)
 	if errno != 0 {
-		fmt.Println(syscall.Errno(errno))
 		return syscall.Errno(errno)
 	}
 	return nil
