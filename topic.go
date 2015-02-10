@@ -2,10 +2,13 @@ package garbage4
 
 import (
 	"encoding/binary"
+	"fmt"
 	"log"
 	"os"
 	"sync"
+	"syscall"
 	"time"
+	"unsafe"
 )
 
 const (
@@ -37,6 +40,7 @@ type Topic struct {
 	addChannel   chan string
 	channelAdded chan *Channel
 	messageAdded chan uint32
+	pageSize     int
 }
 
 func OpenTopic(name string) (*Topic, error) {
@@ -47,6 +51,7 @@ func OpenTopic(name string) (*Topic, error) {
 		addChannel:   make(chan string),
 		channelAdded: make(chan *Channel),
 		messageAdded: make(chan uint32),
+		pageSize:     os.Getpagesize(),
 	}
 	state, err := loadState(t)
 	if err != nil {
@@ -65,20 +70,34 @@ func OpenTopic(name string) (*Topic, error) {
 	return t, nil
 }
 
-func (t *Topic) Write(data []byte) {
+func (t *Topic) Write(data []byte) error {
 	l := len(data)
 	t.dataLock.Lock()
-	offset := int(t.position.offset)
-	if offset+4+l > MAX_QUEUE_SIZE {
+	start := int(t.position.offset)
+	start4 := start + 4
+	if start4+l > MAX_QUEUE_SIZE {
 		t.expand()
-		offset = SEGMENT_HEADER_SIZE
+		start = SEGMENT_HEADER_SIZE
+		start4 = start + 4
 	}
-	encoder.PutUint32(t.segment.data[offset:], uint32(l))
-	offset += 4
-	copy(t.segment.data[offset:], data)
-	t.position.offset = uint32(offset + l)
+
+	//write
+	encoder.PutUint32(t.segment.data[start:], uint32(l))
+	copy(t.segment.data[start4:], data)
+	t.position.offset = uint32(start4 + l)
 	t.dataLock.Unlock()
+
 	t.messageAdded <- uint32(l + 4)
+
+	//msync
+	from := start / t.pageSize * t.pageSize
+	to := start4 + l - from
+	_, _, errno := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&t.segment.data[from])), uintptr(to), syscall.MS_SYNC)
+	if errno != 0 {
+		fmt.Println(syscall.Errno(errno))
+		return syscall.Errno(errno)
+	}
+	return nil
 }
 
 func (t *Topic) Channel(name string) *Channel {
@@ -169,6 +188,7 @@ func (t *Topic) lockedRead(position *Position) []byte {
 	} else {
 		segment = t.loadSegment(position.segmentId)
 		if position.offset >= segment.size {
+			//todo: signal that position.segmentId might be removable
 			segment = t.loadSegment(segment.nextId)
 			position.segmentId = segment.id
 			position.offset = SEGMENT_HEADER_SIZE
