@@ -33,13 +33,13 @@ func newSegment(t *Topic) *Segment {
 	return segment
 }
 
-func openSegment(t *Topic, id uint64, truncate bool) *Segment {
+func openSegment(t *Topic, id uint64, isNew bool) *Segment {
 	name := PATH + t.name + "/" + strconv.FormatUint(id, 10) + ".q"
 	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)
 	}
-	if truncate {
+	if isNew {
 		file.Truncate(MAX_QUEUE_SIZE)
 	}
 	ref, err := syscall.Mmap(int(file.Fd()), 0, MAX_QUEUE_SIZE, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
@@ -53,6 +53,21 @@ func openSegment(t *Topic, id uint64, truncate bool) *Segment {
 		data: (*[MAX_QUEUE_SIZE]byte)(unsafe.Pointer(&ref[0])),
 	}
 	s.Header = (*Header)(unsafe.Pointer(&s.data[0]))
+	if isNew == false {
+		offset := s.size
+		for {
+			o4 := offset + 4
+			if o4 >= MAX_QUEUE_SIZE {
+				break
+			}
+			l := encoder.Uint32(s.data[offset:])
+			if l == 0 {
+				break
+			}
+			offset = l + o4
+		}
+		s.size = offset
+	}
 	return s
 }
 
