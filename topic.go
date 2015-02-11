@@ -6,7 +6,6 @@ import (
 	"os"
 	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
@@ -16,7 +15,6 @@ const (
 
 var (
 	PATH       = "/tmp/q/"
-	SYNC_DELAY = time.Millisecond * 1000
 	encoder    = binary.LittleEndian
 	blank      = struct{}{}
 )
