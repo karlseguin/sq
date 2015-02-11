@@ -14,9 +14,9 @@ const (
 )
 
 var (
-	PATH       = "/tmp/q/"
-	encoder    = binary.LittleEndian
-	blank      = struct{}{}
+	PATH    = "/tmp/q/"
+	encoder = binary.LittleEndian
+	blank   = struct{}{}
 )
 
 func init() {
@@ -47,7 +47,7 @@ func OpenTopic(name string) (*Topic, error) {
 		segments:     make(map[uint64]*Segment),
 		addChannel:   make(chan string),
 		channelAdded: make(chan *Channel),
-		messageAdded: make(chan uint32),
+		messageAdded: make(chan uint32, 128),
 		pageSize:     os.Getpagesize(),
 	}
 	state, err := loadState(t)
