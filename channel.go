@@ -10,7 +10,7 @@ type Handler func(message []byte) error
 type Channel struct {
 	topic    *Topic
 	position *Position
-	lock     sync.Mutex
+	rlock    sync.Mutex
 	cond     *sync.Cond
 	handler  Handler
 	waiting  int
@@ -20,7 +20,7 @@ func newChannel(topic *Topic) *Channel {
 	c := &Channel{
 		topic: topic,
 	}
-	c.cond = &sync.Cond{L: &c.lock}
+	c.cond = &sync.Cond{L: &c.rlock}
 	return c
 }
 
@@ -34,10 +34,10 @@ func (c *Channel) Consume(handler Handler) {
 		c.handle(message)
 	}
 
-	c.lock.Lock()
+	c.rlock.Lock()
 	for {
 		c.cond.Wait()
-		c.lock.Unlock()
+		c.rlock.Unlock()
 		for {
 			message := c.topic.read(c.position)
 			if message == nil {
@@ -46,12 +46,12 @@ func (c *Channel) Consume(handler Handler) {
 			if c.handle(message) == false {
 				continue
 			}
-			c.lock.Lock()
+			c.rlock.Lock()
 			c.waiting -= 1
 			if c.waiting == 0 {
 				break
 			}
-			c.lock.Unlock()
+			c.rlock.Unlock()
 		}
 	}
 }
@@ -66,14 +66,14 @@ func (c *Channel) handle(message []byte) bool {
 }
 
 func (c *Channel) notify(count int) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	c.rlock.Lock()
+	defer c.rlock.Unlock()
 	c.waiting += count
 	c.cond.Signal()
 }
 
 func (c *Channel) aligned() {
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	c.rlock.Lock()
+	defer c.rlock.Unlock()
 	c.waiting = 0
 }

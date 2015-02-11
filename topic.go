@@ -27,28 +27,30 @@ func init() {
 
 type Topic struct {
 	sync.RWMutex
-	dataLock     sync.RWMutex
-	name         string
-	state        *State
-	channels     map[string]*Channel
-	position     *Position
-	segment      *Segment
-	segments     map[uint64]*Segment
-	addChannel   chan string
-	channelAdded chan *Channel
-	messageAdded chan uint32
-	pageSize     int
+	dataLock      sync.RWMutex
+	name          string
+	state         *State
+	channels      map[string]*Channel
+	position      *Position
+	segment       *Segment
+	segments      map[uint64]*Segment
+	segmentCounts map[uint64]int
+	addChannel    chan string
+	channelAdded  chan *Channel
+	messageAdded  chan uint32
+	pageSize      int
 }
 
 func OpenTopic(name string) (*Topic, error) {
 	t := &Topic{
-		name:         name,
-		channels:     make(map[string]*Channel),
-		segments:     make(map[uint64]*Segment),
-		addChannel:   make(chan string),
-		channelAdded: make(chan *Channel),
-		messageAdded: make(chan uint32, 128),
-		pageSize:     os.Getpagesize(),
+		name:          name,
+		channels:      make(map[string]*Channel),
+		segments:      make(map[uint64]*Segment),
+		segmentCounts: make(map[uint64]int),
+		addChannel:    make(chan string),
+		channelAdded:  make(chan *Channel),
+		messageAdded:  make(chan uint32, 64),
+		pageSize:      os.Getpagesize(),
 	}
 	state, err := loadState(t)
 	if err != nil {
@@ -82,9 +84,10 @@ func (t *Topic) Write(data []byte) error {
 	encoder.PutUint32(t.segment.data[start:], uint32(l))
 	copy(t.segment.data[start4:], data)
 	t.position.offset = uint32(start4 + l)
+	l4 := uint32(l + 4)
+	t.segment.size += l4
 	t.dataLock.Unlock()
-
-	t.messageAdded <- uint32(l + 4)
+	t.messageAdded <- l4
 
 	//msync
 	from := start / t.pageSize * t.pageSize
@@ -116,7 +119,9 @@ func (t *Topic) worker() {
 	for {
 		select {
 		case name := <-t.addChannel:
-			var c = t.channels[name]
+			t.RLock()
+			c := t.channels[name]
+			t.RUnlock()
 			if c != nil {
 				log.Printf("multiple instances of channel %s on topic %s\n", name, t.name)
 			} else {
@@ -133,9 +138,8 @@ func (t *Topic) worker() {
 				t.Unlock()
 			}
 			t.channelAdded <- c
-		case l := <-t.messageAdded:
+		case <-t.messageAdded:
 			t.RLock()
-			t.segment.size += l
 			for _, c := range t.channels {
 				c.notify(1)
 			}
@@ -150,15 +154,13 @@ func (t *Topic) align(c *Channel) bool {
 	if t.lockedRead(c.position) != nil {
 		return false
 	}
-	total, count := uint32(0), 0
+	count := 0
 	for {
 		select {
-		case l := <-t.messageAdded:
+		case <-t.messageAdded:
 			count++
-			total += l
 		default:
 			t.Lock()
-			t.segment.size += total
 			for _, c := range t.channels {
 				c.notify(count)
 			}
@@ -182,10 +184,9 @@ func (t *Topic) lockedRead(position *Position) []byte {
 			return nil
 		}
 	} else {
-		segment = t.loadSegment(position.segmentId)
+		segment = t.loadSegment(position.segmentId, 0)
 		if position.offset >= segment.size {
-			//todo: signal that position.segmentId might be removable
-			segment = t.loadSegment(segment.nextId)
+			segment = t.loadSegment(segment.nextId, segment.id)
 			position.segmentId = segment.id
 			position.offset = SEGMENT_HEADER_SIZE
 		}
@@ -197,20 +198,34 @@ func (t *Topic) lockedRead(position *Position) []byte {
 	return segment.data[start:end]
 }
 
-func (t *Topic) loadSegment(id uint64) *Segment {
-	t.RLock()
-	segment := t.segments[id]
-	t.RUnlock()
-	if segment != nil {
-		return segment
-	}
+func (t *Topic) loadSegment(id uint64, previousId uint64) *Segment {
 	t.Lock()
 	defer t.Unlock()
-	segment = t.segments[id]
+	segment := t.segments[id]
+	if previousId != 0 {
+		t.segmentCounts[id] += 1
+		if previous := t.segmentCounts[previousId] - 1; previous == 0 {
+			t.segments[previousId].Close()
+			delete(t.segments, previousId)
+			delete(t.segmentCounts, previousId)
+		} else {
+			t.segmentCounts[previousId] = previous
+		}
+	}
 	if segment != nil {
 		return segment
 	}
 	segment = openSegment(t, id, false)
 	t.segments[id] = segment
 	return segment
+}
+
+func (t *Topic) closeSegment(id uint64) {
+	t.Lock()
+	defer t.Unlock()
+	if t.segmentCounts[id] != 0 {
+		return
+	}
+	t.segments[id].Close()
+	delete(t.segments, id)
 }
