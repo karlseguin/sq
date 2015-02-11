@@ -71,13 +71,9 @@ func openSegment(t *Topic, id uint64, isNew bool) *Segment {
 	return s
 }
 
-func (s *Segment) close() {
+func (s *Segment) delete() {
 	syscall.Munmap(s.ref)
 	s.file.Close()
 	s.data, s.ref = nil, nil
-}
-
-func (s *Segment) delete() {
-	s.close()
 	os.Remove(s.file.Name())
 }

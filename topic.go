@@ -125,7 +125,7 @@ func (t *Topic) worker() {
 			if c != nil {
 				log.Printf("multiple instances of channel %s on topic %s\n", name, t.name)
 			} else {
-				c = newChannel(t)
+				c = newChannel(t, name)
 				c.position = t.state.loadOrCreatePosition(name)
 				if c.position.segmentId == 0 {
 					t.dataLock.RLock()
@@ -153,7 +153,9 @@ func (t *Topic) worker() {
 				segment := t.segments[id]
 				delete(t.segments, id)
 				t.Unlock()
-				segment.delete()
+				if segment != nil {
+					segment.delete() //too channels can finish with a segment at the same time
+				}
 			}
 		}
 	}

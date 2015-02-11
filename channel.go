@@ -8,19 +8,21 @@ import (
 type Handler func(message []byte) error
 
 type Channel struct {
+	sync.Mutex
+	name     string
 	topic    *Topic
 	position *Position
-	rlock    sync.Mutex
 	cond     *sync.Cond
 	handler  Handler
 	waiting  int
 }
 
-func newChannel(topic *Topic) *Channel {
+func newChannel(topic *Topic, name string) *Channel {
 	c := &Channel{
+		name:  name,
 		topic: topic,
 	}
-	c.cond = &sync.Cond{L: &c.rlock}
+	c.cond = &sync.Cond{L: &c.Mutex}
 	return c
 }
 
@@ -34,24 +36,26 @@ func (c *Channel) Consume(handler Handler) {
 		c.handle(message)
 	}
 
-	c.rlock.Lock()
+	c.Lock()
 	for {
-		c.cond.Wait()
-		c.rlock.Unlock()
+		for c.waiting == 0 {
+			c.cond.Wait()
+		}
+		c.Unlock()
 		for {
 			message := c.topic.read(c.position)
 			if message == nil {
-				panic("should not happen //todo: handle better")
+				panic("should not happen //todo: handle better: " + c.name)
 			}
 			if c.handle(message) == false {
 				continue
 			}
-			c.rlock.Lock()
+			c.Lock()
 			c.waiting -= 1
 			if c.waiting == 0 {
 				break
 			}
-			c.rlock.Unlock()
+			c.Unlock()
 		}
 	}
 }
@@ -66,14 +70,14 @@ func (c *Channel) handle(message []byte) bool {
 }
 
 func (c *Channel) notify(count int) {
-	c.rlock.Lock()
-	defer c.rlock.Unlock()
+	c.Lock()
+	defer c.Unlock()
 	c.waiting += count
 	c.cond.Signal()
 }
 
 func (c *Channel) aligned() {
-	c.rlock.Lock()
-	defer c.rlock.Unlock()
+	c.Lock()
+	defer c.Unlock()
 	c.waiting = 0
 }

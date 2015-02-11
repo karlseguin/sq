@@ -102,9 +102,3 @@ func (s *State) usable(segmentId uint64) bool {
 	}
 	return false
 }
-
-func (s *State) Close() {
-	syscall.Munmap(s.ref)
-	s.file.Close()
-	s.data, s.ref = nil, nil
-}
