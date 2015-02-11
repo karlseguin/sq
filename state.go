@@ -86,7 +86,8 @@ func (s *State) loadOrCreatePosition(name string) *Position {
 		s.offset += copy(s.data[s.offset:], name)
 		s.data[s.offset] = 0
 		offset = s.offset + 1
-		s.offset += 17
+		s.offset += 17 //segmentId + offset + 1 for name null
+		s.channels[name] = offset
 	}
 	return s.loadPosition(offset)
 }
