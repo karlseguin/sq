@@ -27,30 +27,30 @@ func init() {
 
 type Topic struct {
 	sync.RWMutex
-	dataLock      sync.RWMutex
-	name          string
-	state         *State
-	channels      map[string]*Channel
-	position      *Position
-	segment       *Segment
-	segments      map[uint64]*Segment
-	segmentCounts map[uint64]int
-	addChannel    chan string
-	channelAdded  chan *Channel
-	messageAdded  chan uint32
-	pageSize      int
+	dataLock     sync.RWMutex
+	name         string
+	state        *State
+	channels     map[string]*Channel
+	position     *Position
+	segment      *Segment
+	segments     map[uint64]*Segment
+	addChannel   chan string
+	channelAdded chan *Channel
+	messageAdded chan uint32
+	segmentDone  chan uint64
+	pageSize     int
 }
 
 func OpenTopic(name string) (*Topic, error) {
 	t := &Topic{
-		name:          name,
-		channels:      make(map[string]*Channel),
-		segments:      make(map[uint64]*Segment),
-		segmentCounts: make(map[uint64]int),
-		addChannel:    make(chan string),
-		channelAdded:  make(chan *Channel),
-		messageAdded:  make(chan uint32, 64),
-		pageSize:      os.Getpagesize(),
+		name:         name,
+		channels:     make(map[string]*Channel),
+		segments:     make(map[uint64]*Segment),
+		addChannel:   make(chan string),
+		channelAdded: make(chan *Channel),
+		segmentDone:  make(chan uint64, 8),
+		messageAdded: make(chan uint32, 64),
+		pageSize:     os.Getpagesize(),
 	}
 	state, err := loadState(t)
 	if err != nil {
@@ -144,6 +144,17 @@ func (t *Topic) worker() {
 				c.notify(1)
 			}
 			t.RUnlock()
+		case id := <-t.segmentDone:
+			t.dataLock.RLock()
+			usable := t.state.usable(id)
+			t.dataLock.RUnlock()
+			if usable == false {
+				t.Lock()
+				segment := t.segments[id]
+				delete(t.segments, id)
+				t.Unlock()
+				segment.delete()
+			}
 		}
 	}
 }
@@ -184,11 +195,13 @@ func (t *Topic) lockedRead(position *Position) []byte {
 			return nil
 		}
 	} else {
-		segment = t.loadSegment(position.segmentId, 0)
+		segment = t.loadSegment(position.segmentId)
 		if position.offset >= segment.size {
-			segment = t.loadSegment(segment.nextId, segment.id)
+			previousId := segment.id
+			segment = t.loadSegment(segment.nextId)
 			position.segmentId = segment.id
 			position.offset = SEGMENT_HEADER_SIZE
+			t.segmentDone <- previousId
 		}
 	}
 
@@ -198,34 +211,20 @@ func (t *Topic) lockedRead(position *Position) []byte {
 	return segment.data[start:end]
 }
 
-func (t *Topic) loadSegment(id uint64, previousId uint64) *Segment {
+func (t *Topic) loadSegment(id uint64) *Segment {
+	t.RLock()
+	segment := t.segments[id]
+	t.RUnlock()
+	if segment != nil {
+		return segment
+	}
 	t.Lock()
 	defer t.Unlock()
-	segment := t.segments[id]
-	if previousId != 0 {
-		t.segmentCounts[id] += 1
-		if previous := t.segmentCounts[previousId] - 1; previous == 0 {
-			t.segments[previousId].Close()
-			delete(t.segments, previousId)
-			delete(t.segmentCounts, previousId)
-		} else {
-			t.segmentCounts[previousId] = previous
-		}
-	}
+	segment = t.segments[id]
 	if segment != nil {
 		return segment
 	}
 	segment = openSegment(t, id, false)
 	t.segments[id] = segment
 	return segment
-}
-
-func (t *Topic) closeSegment(id uint64) {
-	t.Lock()
-	defer t.Unlock()
-	if t.segmentCounts[id] != 0 {
-		return
-	}
-	t.segments[id].Close()
-	delete(t.segments, id)
 }

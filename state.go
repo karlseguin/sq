@@ -2,6 +2,7 @@ package garbage4
 
 import (
 	"os"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -9,6 +10,7 @@ import (
 const MAX_STATE_SIZE = 32768
 
 type State struct {
+	sync.RWMutex
 	ref      []byte
 	file     *os.File
 	offset   int
@@ -90,6 +92,15 @@ func (s *State) loadOrCreatePosition(name string) *Position {
 		s.channels[name] = offset
 	}
 	return s.loadPosition(offset)
+}
+
+func (s *State) usable(segmentId uint64) bool {
+	for _, offset := range s.channels {
+		if s.loadPosition(offset).segmentId <= segmentId {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *State) Close() {
