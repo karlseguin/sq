@@ -2,8 +2,10 @@ package garbage4
 
 import (
 	"encoding/binary"
-	"log"
+	"fmt"
+	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -25,6 +27,11 @@ func init() {
 	}
 }
 
+type addChannelResult struct {
+	err     error
+	channel *Channel
+}
+
 type Topic struct {
 	sync.RWMutex
 	dataLock     sync.RWMutex
@@ -35,7 +42,7 @@ type Topic struct {
 	segment      *Segment
 	segments     map[uint64]*Segment
 	addChannel   chan string
-	channelAdded chan *Channel
+	channelAdded chan addChannelResult
 	messageAdded chan uint32
 	segmentDone  chan uint64
 	pageSize     int
@@ -47,7 +54,7 @@ func OpenTopic(name string) (*Topic, error) {
 		channels:     make(map[string]*Channel),
 		segments:     make(map[uint64]*Segment),
 		addChannel:   make(chan string),
-		channelAdded: make(chan *Channel),
+		channelAdded: make(chan addChannelResult),
 		segmentDone:  make(chan uint64, 8),
 		messageAdded: make(chan uint32, 64),
 		pageSize:     os.Getpagesize(),
@@ -99,9 +106,10 @@ func (t *Topic) Write(data []byte) error {
 	return nil
 }
 
-func (t *Topic) Channel(name string) *Channel {
+func (t *Topic) Channel(name string) (*Channel, error) {
 	t.addChannel <- name
-	return <-t.channelAdded
+	res := <-t.channelAdded
+	return res.channel, res.err
 }
 
 func (t *Topic) expand() {
@@ -119,25 +127,8 @@ func (t *Topic) worker() {
 	for {
 		select {
 		case name := <-t.addChannel:
-			t.RLock()
-			c := t.channels[name]
-			t.RUnlock()
-			if c != nil {
-				log.Printf("multiple instances of channel %s on topic %s\n", name, t.name)
-			} else {
-				c = newChannel(t, name)
-				c.position = t.state.loadOrCreatePosition(name)
-				if c.position.segmentId == 0 {
-					t.dataLock.RLock()
-					c.position.offset = t.position.offset
-					c.position.segmentId = t.position.segmentId
-					t.dataLock.RUnlock()
-				}
-				t.Lock()
-				t.channels[name] = c
-				t.Unlock()
-			}
-			t.channelAdded <- c
+			c, err := t.createChannel(name)
+			t.channelAdded <- addChannelResult{channel: c, err: err}
 		case <-t.messageAdded:
 			t.RLock()
 			for _, c := range t.channels {
@@ -159,6 +150,37 @@ func (t *Topic) worker() {
 			}
 		}
 	}
+}
+
+func (t *Topic) createChannel(name string) (*Channel, error) {
+	temp := false
+	if len(name) == 0 {
+		name = "tmp." + strconv.Itoa(rand.Int())
+		temp = true
+	}
+	t.Lock()
+	defer t.Unlock()
+	if _, exists := t.channels[name]; exists {
+		if temp {
+			return t.createChannel("")
+		}
+		return nil, fmt.Errorf("channel %q for topic %q already exists", name, t.name)
+	}
+
+	c := newChannel(t, name)
+	if temp {
+		c.position = new(Position)
+	} else {
+		c.position = t.state.loadOrCreatePosition(name)
+	}
+	if temp || c.position.segmentId == 0 {
+		t.dataLock.RLock()
+		c.position.offset = t.position.offset
+		c.position.segmentId = t.position.segmentId
+		t.dataLock.RUnlock()
+	}
+	t.channels[name] = c
+	return c, nil
 }
 
 func (t *Topic) align(c *Channel) bool {
