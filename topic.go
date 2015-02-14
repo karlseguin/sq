@@ -27,9 +27,11 @@ func init() {
 	}
 }
 
-type addChannelResult struct {
+type addChannelWork struct {
 	err     error
+	name    string
 	channel *Channel
+	c    chan *addChannelWork
 }
 
 type Topic struct {
@@ -41,8 +43,7 @@ type Topic struct {
 	position     *Position
 	segment      *Segment
 	segments     map[uint64]*Segment
-	addChannel   chan string
-	channelAdded chan addChannelResult
+	addChannel   chan *addChannelWork
 	messageAdded chan uint32
 	segmentDone  chan uint64
 	pageSize     int
@@ -53,8 +54,7 @@ func OpenTopic(name string) (*Topic, error) {
 		name:         name,
 		channels:     make(map[string]*Channel),
 		segments:     make(map[uint64]*Segment),
-		addChannel:   make(chan string),
-		channelAdded: make(chan addChannelResult),
+		addChannel:   make(chan *addChannelWork),
 		segmentDone:  make(chan uint64, 8),
 		messageAdded: make(chan uint32, 64),
 		pageSize:     os.Getpagesize(),
@@ -107,8 +107,12 @@ func (t *Topic) Write(data []byte) error {
 }
 
 func (t *Topic) Channel(name string) (*Channel, error) {
-	t.addChannel <- name
-	res := <-t.channelAdded
+	res := &addChannelWork{
+		name: name,
+		c: make(chan *addChannelWork),
+	}
+	t.addChannel <- res
+	<- res.c
 	return res.channel, res.err
 }
 
@@ -126,9 +130,9 @@ func (t *Topic) expand() {
 func (t *Topic) worker() {
 	for {
 		select {
-		case name := <-t.addChannel:
-			c, err := t.createChannel(name)
-			t.channelAdded <- addChannelResult{channel: c, err: err}
+		case work := <-t.addChannel:
+			work.channel, work.err = t.createChannel(work.name)
+			work.c <- work
 		case <-t.messageAdded:
 			t.RLock()
 			for _, c := range t.channels {
