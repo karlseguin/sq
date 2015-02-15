@@ -8,13 +8,16 @@ import (
 	"unsafe"
 )
 
-const SEGMENT_HEADER_SIZE = 32
+const (
+	MAX_SEGMENT_SIZE    = 256
+	SEGMENT_HEADER_SIZE = 32
+)
 
 type Segment struct {
 	*Header
 	ref  []byte
 	file *os.File
-	data *[MAX_QUEUE_SIZE]byte
+	data *[MAX_SEGMENT_SIZE]byte
 }
 
 type Header struct {
@@ -40,9 +43,9 @@ func openSegment(t *Topic, id uint64, isNew bool) *Segment {
 		panic(err)
 	}
 	if isNew {
-		file.Truncate(MAX_QUEUE_SIZE)
+		file.Truncate(MAX_SEGMENT_SIZE)
 	}
-	ref, err := syscall.Mmap(int(file.Fd()), 0, MAX_QUEUE_SIZE, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	ref, err := syscall.Mmap(int(file.Fd()), 0, MAX_SEGMENT_SIZE, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
 		panic(err)
 	}
@@ -50,14 +53,14 @@ func openSegment(t *Topic, id uint64, isNew bool) *Segment {
 	s := &Segment{
 		ref:  ref,
 		file: file,
-		data: (*[MAX_QUEUE_SIZE]byte)(unsafe.Pointer(&ref[0])),
+		data: (*[MAX_SEGMENT_SIZE]byte)(unsafe.Pointer(&ref[0])),
 	}
 	s.Header = (*Header)(unsafe.Pointer(&s.data[0]))
 	if isNew == false {
 		offset := s.size
 		for {
 			o4 := offset + 4
-			if o4 >= MAX_QUEUE_SIZE {
+			if o4 >= MAX_SEGMENT_SIZE {
 				break
 			}
 			l := encoder.Uint32(s.data[offset:])

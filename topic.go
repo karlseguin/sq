@@ -11,10 +11,6 @@ import (
 	"unsafe"
 )
 
-const (
-	MAX_QUEUE_SIZE = 256
-)
-
 var (
 	PATH    = "/tmp/q/"
 	encoder = binary.LittleEndian
@@ -31,7 +27,7 @@ type addChannelWork struct {
 	err     error
 	name    string
 	channel *Channel
-	c    chan *addChannelWork
+	c       chan *addChannelWork
 }
 
 type Topic struct {
@@ -81,7 +77,7 @@ func (t *Topic) Write(data []byte) error {
 	t.dataLock.Lock()
 	start := int(t.position.offset)
 	start4 := start + 4
-	if start4+l > MAX_QUEUE_SIZE {
+	if start4+l > MAX_SEGMENT_SIZE {
 		t.expand()
 		start = SEGMENT_HEADER_SIZE
 		start4 = start + 4
@@ -109,10 +105,10 @@ func (t *Topic) Write(data []byte) error {
 func (t *Topic) Channel(name string) (*Channel, error) {
 	res := &addChannelWork{
 		name: name,
-		c: make(chan *addChannelWork),
+		c:    make(chan *addChannelWork),
 	}
 	t.addChannel <- res
-	<- res.c
+	<-res.c
 	return res.channel, res.err
 }
 
