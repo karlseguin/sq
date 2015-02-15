@@ -7,7 +7,13 @@ import (
 	"unsafe"
 )
 
-const MAX_STATE_SIZE = 32768
+const (
+	MAX_STATE_SIZE = 32768
+)
+
+var (
+	MAX_CHANNEL_NAME_SIZE = 32
+)
 
 type State struct {
 	sync.RWMutex
@@ -58,21 +64,20 @@ func loadState(t *Topic) (*State, error) {
 		data:     (*[MAX_STATE_SIZE]byte)(unsafe.Pointer(&ref[0])),
 	}
 
-	start, end := 16, 16
-	for {
-		if state.data[end] == 0 {
-			if end == start {
-				break
-			}
-			offset := end + 1
-			state.channels[string(state.data[start:end])] = offset
-			start = offset + 16
-			end = start
-		} else {
-			end++
+	offset := 16
+	recordSize := offset + MAX_CHANNEL_NAME_SIZE
+	for ; (offset+recordSize) < MAX_STATE_SIZE && state.data[offset] != 0; offset += recordSize {
+		//deleted channel
+		if state.data[offset] == 255 {
+			continue
 		}
+		end := offset
+		for ; (end-offset) < MAX_CHANNEL_NAME_SIZE && state.data[end] != 0; end++ {
+		}
+		println(offset, end, string(state.data[offset:end]))
+		state.channels[string(state.data[offset:end])] = offset + MAX_CHANNEL_NAME_SIZE
 	}
-	state.offset = end
+	state.offset = offset
 	return state, nil
 }
 
@@ -84,13 +89,12 @@ func (s *State) loadOrCreatePosition(name string) *Position {
 	offset, exists := s.channels[name]
 	if exists == false {
 		//todo check for overflow
-		//todo compact
-		s.offset += copy(s.data[s.offset:], name)
-		s.data[s.offset] = 0
-		offset = s.offset + 1
-		s.offset += 17 //segmentId + offset + 1 for name null
+		copy(s.data[s.offset:], name)
+		offset = s.offset + MAX_CHANNEL_NAME_SIZE
 		s.channels[name] = offset
+		s.offset = offset + 16
 	}
+	println(offset)
 	return s.loadPosition(offset)
 }
 

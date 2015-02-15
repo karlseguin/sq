@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	PATH    = "/tmp/q/"
-	encoder = binary.LittleEndian
-	blank   = struct{}{}
+	PATH              = "/tmp/q/"
+	encoder           = binary.LittleEndian
+	blank             = struct{}{}
+	ChannelNameLenErr = fmt.Errorf("channel name cannot exceed %d characters", MAX_CHANNEL_NAME_SIZE)
 )
 
 func init() {
@@ -103,6 +104,9 @@ func (t *Topic) Write(data []byte) error {
 }
 
 func (t *Topic) Channel(name string) (*Channel, error) {
+	if len(name) > MAX_CHANNEL_NAME_SIZE {
+		return nil, ChannelNameLenErr
+	}
 	res := &addChannelWork{
 		name: name,
 		c:    make(chan *addChannelWork),
