@@ -159,13 +159,14 @@ func (t *Topic) createChannel(name string) (*Channel, error) {
 		temp = true
 	}
 	t.Lock()
-	defer t.Unlock()
 	if _, exists := t.channels[name]; exists {
+		t.Unlock()
 		if temp {
 			return t.createChannel("")
 		}
 		return nil, fmt.Errorf("channel %q for topic %q already exists", name, t.name)
 	}
+	defer t.Unlock()
 
 	c := newChannel(t, name)
 	if temp {
