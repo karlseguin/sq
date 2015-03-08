@@ -31,11 +31,10 @@ type Position struct {
 }
 
 func loadState(t *Topic) (*State, error) {
-	root := t.path
-	if err := os.MkdirAll(root, 0700); err != nil {
+	if err := os.MkdirAll(t.path, 0700); err != nil {
 		return nil, err
 	}
-	path := path.Join(root, "state.q")
+	path := path.Join(t.path, "state.q")
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		return nil, err
@@ -75,7 +74,6 @@ func loadState(t *Topic) (*State, error) {
 		end := offset
 		for ; (end-offset) < MAX_CHANNEL_NAME_SIZE && state.data[end] != 0; end++ {
 		}
-		println(offset, end, string(state.data[offset:end]))
 		state.channels[string(state.data[offset:end])] = offset + MAX_CHANNEL_NAME_SIZE
 	}
 	return state, nil
@@ -100,7 +98,6 @@ func (s *State) loadOrCreatePosition(name string) *Position {
 		offset += MAX_CHANNEL_NAME_SIZE
 		s.channels[name] = offset
 	}
-	println(offset)
 	return s.loadPosition(offset)
 }
 
