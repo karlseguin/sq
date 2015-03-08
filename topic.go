@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path"
 	"strconv"
 	"sync"
 	"syscall"
@@ -12,17 +13,10 @@ import (
 )
 
 var (
-	PATH              = "/tmp/q/"
 	encoder           = binary.LittleEndian
 	blank             = struct{}{}
 	ChannelNameLenErr = fmt.Errorf("channel name cannot exceed %d characters", MAX_CHANNEL_NAME_SIZE)
 )
-
-func init() {
-	if err := os.MkdirAll(PATH, 0700); err != nil {
-		panic(err)
-	}
-}
 
 type addChannelWork struct {
 	err     error
@@ -35,6 +29,7 @@ type Topic struct {
 	sync.RWMutex
 	dataLock     sync.RWMutex
 	name         string
+	path         string
 	state        *State
 	channels     map[string]*Channel
 	position     *Position
@@ -46,9 +41,10 @@ type Topic struct {
 	pageSize     int
 }
 
-func OpenTopic(name string) (*Topic, error) {
+func OpenTopic(name string, config *Configuration) (*Topic, error) {
 	t := &Topic{
 		name:         name,
+		path:         path.Join(config.path, name),
 		channels:     make(map[string]*Channel),
 		segments:     make(map[uint64]*Segment),
 		addChannel:   make(chan *addChannelWork),

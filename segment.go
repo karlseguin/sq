@@ -2,6 +2,7 @@ package garbage4
 
 import (
 	"os"
+	"path"
 	"strconv"
 	"syscall"
 	"time"
@@ -37,7 +38,7 @@ func newSegment(t *Topic) *Segment {
 }
 
 func openSegment(t *Topic, id uint64, isNew bool) *Segment {
-	name := PATH + t.name + "/" + strconv.FormatUint(id, 10) + ".q"
+	name := path.Join(t.path, strconv.FormatUint(id, 10)+".q")
 	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)

@@ -2,6 +2,7 @@ package garbage4
 
 import (
 	"os"
+	"path"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -30,11 +31,11 @@ type Position struct {
 }
 
 func loadState(t *Topic) (*State, error) {
-	root := PATH + t.name
+	root := t.path
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return nil, err
 	}
-	path := root + "/state.q"
+	path := path.Join(root, "state.q")
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		return nil, err
