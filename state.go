@@ -9,103 +9,96 @@ import (
 )
 
 const (
-	POSITION_SIZE  = 16
-	MAX_STATE_SIZE = 32768
-)
-
-var (
+	MAX_CHHANNELS         = 128
 	MAX_CHANNEL_NAME_SIZE = 32
 )
 
-type State struct {
+type States struct {
 	sync.RWMutex
-	ref      []byte
+	data     []byte
 	file     *os.File
-	data     *[MAX_STATE_SIZE]byte
-	channels map[string]int
+	free     []*State
+	channels map[string]*State
 }
 
-type Position struct {
+type State struct {
+	flag      uint64
+	l         byte
+	name      [MAX_CHANNEL_NAME_SIZE]rune
 	offset    uint32
 	segmentId uint64
 }
 
-func loadState(t *Topic) (*State, error) {
-	if err := os.MkdirAll(t.path, 0700); err != nil {
-		return nil, err
+func loadStates(topic *Topic) error {
+	if err := os.MkdirAll(topic.path, 0700); err != nil {
+		return err
 	}
-	path := path.Join(t.path, "state.q")
+	path := path.Join(topic.path, "state")
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
+	sizePerEntry := int(unsafe.Sizeof(State{}))
+	maxSize := sizePerEntry * (MAX_CHHANNELS + 1)
+	file.Truncate(int64(maxSize))
 
-	if size := info.Size(); size == 0 {
-		file.Truncate(MAX_STATE_SIZE)
-	} else if size != MAX_STATE_SIZE {
-		panic("invalid state file size")
-	}
-
-	ref, err := syscall.Mmap(int(file.Fd()), 0, MAX_STATE_SIZE, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	data, err := syscall.Mmap(int(file.Fd()), 0, maxSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
 		file.Close()
-		return nil, err
+		return err
 	}
 
-	state := &State{
-		ref:      ref,
+	states := &States{
+		data:     data,
 		file:     file,
-		channels: make(map[string]int),
-		data:     (*[MAX_STATE_SIZE]byte)(unsafe.Pointer(&ref[0])),
+		channels: make(map[string]*State),
+		free:     make([]*State, 0, MAX_CHHANNELS),
 	}
 
-	offset := POSITION_SIZE
-	recordSize := offset + MAX_CHANNEL_NAME_SIZE
-	for ; (offset+recordSize) < MAX_STATE_SIZE && state.data[offset] != 0; offset += recordSize {
-		//deleted channel
-		if state.data[offset] == 255 {
-			continue
+	// // the first entry is always the topic's entry
+	topic.state = (*State)(unsafe.Pointer(&states.data[0]))
+	for position := sizePerEntry; position < maxSize; position += sizePerEntry {
+		state := (*State)(unsafe.Pointer(&states.data[position]))
+		if state.l > 0 {
+			states.channels[string(state.name[:state.l])] = state
+		} else {
+			states.free = append(states.free, state)
 		}
-		end := offset
-		for ; (end-offset) < MAX_CHANNEL_NAME_SIZE && state.data[end] != 0; end++ {
-		}
-		state.channels[string(state.data[offset:end])] = offset + MAX_CHANNEL_NAME_SIZE
 	}
-	return state, nil
+	topic.states = states
+	return nil
 }
 
-func (s *State) loadPosition(offset int) *Position {
-	return (*Position)(unsafe.Pointer(&s.data[offset]))
+// func (s *State) loadEntry(offset int) *Position {
+// 	return
+// }
+
+// synchronization is provided by the topic
+func (s *States) getOrCreate(name string) *State {
+	if state, exists := s.channels[name]; exists {
+		return state
+	}
+
+	// no more free space
+	// todo: expand the state and remove the limit on channels
+	if len(s.free) == 0 {
+		return nil
+	}
+	state := s.free[0]
+	state.l = byte(len(name))
+	for i, r := range name {
+		state.name[i] = r
+	}
+	s.free = s.free[1:]
+	return state
 }
 
-func (s *State) loadOrCreatePosition(name string) *Position {
-	offset, exists := s.channels[name]
-	if exists == false {
-		//todo check for overflow
-		offset = POSITION_SIZE
-		for ; offset < MAX_CHANNEL_NAME_SIZE; offset += MAX_CHANNEL_NAME_SIZE + POSITION_SIZE {
-			b := s.data[offset]
-			if b == 0 || b == 255 {
-				break
-			}
-		}
-		copy(s.data[offset:], name)
-		offset += MAX_CHANNEL_NAME_SIZE
-		s.channels[name] = offset
-	}
-	return s.loadPosition(offset)
-}
-
-func (s *State) usable(segmentId uint64) bool {
-	for _, offset := range s.channels {
-		if s.loadPosition(offset).segmentId <= segmentId {
-			return true
-		}
-	}
+func (s *States) usable(segmentId uint64) bool {
+	// for _, entry := range s.entries {
+	// if s.loadPosition(offset).segmentId <= segmentId {
+	// 	return true
+	// }
+	// }
 	return false
 }

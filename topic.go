@@ -16,6 +16,8 @@ var (
 	encoder           = binary.LittleEndian
 	blank             = struct{}{}
 	ChannelNameLenErr = fmt.Errorf("channel name cannot exceed %d characters", MAX_CHANNEL_NAME_SIZE)
+	ChannelExistsErr  = fmt.Errorf("channel already exists")
+	ChannelCreateErr  = fmt.Errorf("channel count not be created")
 )
 
 type addChannelWork struct {
@@ -28,38 +30,34 @@ type addChannelWork struct {
 type Topic struct {
 	sync.RWMutex
 	dataLock     sync.RWMutex
-	name         string
 	path         string
 	state        *State
+	states       *States
 	channels     map[string]*Channel
-	position     *Position
 	segment      *Segment
 	segments     map[uint64]*Segment
 	addChannel   chan *addChannelWork
-	messageAdded chan uint32
-	segmentDone  chan uint64
-	pageSize     int
+	messageAdded chan struct{}
+	// segmentDone  chan uint64
+	pageSize int
 }
 
 func OpenTopic(name string, config *Configuration) (*Topic, error) {
 	t := &Topic{
-		name:         name,
-		path:         path.Join(config.path, name),
-		channels:     make(map[string]*Channel),
-		segments:     make(map[uint64]*Segment),
-		addChannel:   make(chan *addChannelWork),
-		segmentDone:  make(chan uint64, 8),
-		messageAdded: make(chan uint32, 64),
+		path:       path.Join(config.path, name),
+		channels:   make(map[string]*Channel),
+		segments:   make(map[uint64]*Segment),
+		addChannel: make(chan *addChannelWork),
+		// segmentDone:  make(chan uint64, 8),
+		messageAdded: make(chan struct{}, 64),
 		pageSize:     os.Getpagesize(),
 	}
-	state, err := loadState(t)
+	err := loadStates(t)
 	if err != nil {
 		return nil, err
 	}
 
-	t.state = state
-	t.position = state.loadPosition(0)
-	if id := t.position.segmentId; id == 0 {
+	if id := t.state.segmentId; id == 0 {
 		t.expand()
 	} else {
 		t.segment = openSegment(t, id, false)
@@ -70,32 +68,42 @@ func OpenTopic(name string, config *Configuration) (*Topic, error) {
 }
 
 func (t *Topic) Write(data []byte) error {
-	l := len(data)
+	length := len(data)
+
 	t.dataLock.Lock()
-	start := int(t.position.offset)
-	start4 := start + 4
-	if start4+l > MAX_SEGMENT_SIZE {
+	start := int(t.state.offset)
+	dataStart := start + 4
+	dataEnd := dataStart + length
+
+	// do we have enough space in the current segment?
+	if dataEnd > MAX_SEGMENT_SIZE {
 		t.expand()
-		start = SEGMENT_HEADER_SIZE
-		start4 = start + 4
+		start = int(SEGMENT_HEADER_SIZE)
+		dataStart = start + 4
+		dataEnd = dataStart + length
 	}
 
-	//write
-	encoder.PutUint32(t.segment.data[start:], uint32(l))
-	copy(t.segment.data[start4:], data)
-	t.position.offset = uint32(start4 + l)
-	l4 := uint32(l + 4)
-	t.segment.size += l4
+	// write the message length
+	encoder.PutUint32(t.segment.data[start:], uint32(length))
+	// write the message
+	copy(t.segment.data[dataStart:], data)
+	// location of the next write
+	t.state.offset = uint32(dataEnd)
+	// update the size of this segment
+	t.segment.size += uint32(length + 4)
 	t.dataLock.Unlock()
-	t.messageAdded <- l4
 
-	//msync
+	// sync the part of the data file we just wrote
 	from := start / t.pageSize * t.pageSize
-	to := start4 + l - from
+	to := dataStart + length - from
 	_, _, errno := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&t.segment.data[from])), uintptr(to), syscall.MS_SYNC)
 	if errno != 0 {
 		return syscall.Errno(errno)
 	}
+
+	// notify channels that a new message is waiting
+	t.messageAdded <- blank
+
 	return nil
 }
 
@@ -119,8 +127,8 @@ func (t *Topic) expand() {
 		t.segment.nextId = segment.id
 	}
 	t.segment = segment
-	t.position.offset = SEGMENT_HEADER_SIZE
-	t.position.segmentId = segment.id
+	t.state.offset = SEGMENT_HEADER_SIZE
+	t.state.segmentId = segment.id
 }
 
 func (t *Topic) worker() {
@@ -135,19 +143,19 @@ func (t *Topic) worker() {
 				c.notify(1)
 			}
 			t.RUnlock()
-		case id := <-t.segmentDone:
-			t.dataLock.RLock()
-			usable := t.state.usable(id)
-			t.dataLock.RUnlock()
-			if usable == false {
-				t.Lock()
-				segment := t.segments[id]
-				delete(t.segments, id)
-				t.Unlock()
-				if segment != nil {
-					segment.delete() //too channels can finish with a segment at the same time
-				}
-			}
+			// case id := <-t.segmentDone:
+			// 	t.dataLock.RLock()
+			// 	usable := t.state.usable(id)
+			// 	t.dataLock.RUnlock()
+			// 	if usable == false {
+			// 		t.Lock()
+			// 		segment := t.segments[id]
+			// 		delete(t.segments, id)
+			// 		t.Unlock()
+			// 		if segment != nil {
+			// 			segment.delete() //too channels can finish with a segment at the same time
+			// 		}
+			// 	}
 		}
 	}
 }
@@ -159,25 +167,33 @@ func (t *Topic) createChannel(name string) (*Channel, error) {
 		temp = true
 	}
 	t.Lock()
-	if _, exists := t.channels[name]; exists {
+	_, exists := t.channels[name]
+	if exists {
 		t.Unlock()
 		if temp {
+			// try again until we've created one
 			return t.createChannel("")
 		}
-		return nil, fmt.Errorf("channel %q for topic %q already exists", name, t.name)
+		return nil, ChannelExistsErr
 	}
 	defer t.Unlock()
 
 	c := newChannel(t, name)
 	if temp {
-		c.position = new(Position)
+		c.state = new(State)
 	} else {
-		c.position = t.state.loadOrCreatePosition(name)
+		c.state = t.states.getOrCreate(name)
+		if c.state == nil {
+			return nil, ChannelCreateErr
+		}
 	}
-	if temp || c.position.segmentId == 0 {
+
+	// if we have a temp channel, or a new channel, set the position to the
+	// writer's current position
+	if temp || c.state.segmentId == 0 {
 		t.dataLock.RLock()
-		c.position.offset = t.position.offset
-		c.position.segmentId = t.position.segmentId
+		c.state.offset = t.state.offset
+		c.state.segmentId = t.state.segmentId
 		t.dataLock.RUnlock()
 	}
 	t.channels[name] = c
@@ -187,7 +203,7 @@ func (t *Topic) createChannel(name string) (*Channel, error) {
 func (t *Topic) align(c *Channel) bool {
 	t.dataLock.Lock()
 	defer t.dataLock.Unlock()
-	if t.lockedRead(c.position) != nil {
+	if t.lockedRead(c.state) != nil {
 		return false
 	}
 	count := 0
@@ -207,31 +223,31 @@ func (t *Topic) align(c *Channel) bool {
 	}
 }
 
-func (t *Topic) read(position *Position) []byte {
+func (t *Topic) read(state *State) []byte {
 	t.dataLock.RLock()
 	defer t.dataLock.RUnlock()
-	return t.lockedRead(position)
+	return t.lockedRead(state)
 }
 
-func (t *Topic) lockedRead(position *Position) []byte {
+func (t *Topic) lockedRead(state *State) []byte {
 	segment := t.segment
-	if position.segmentId == segment.id {
-		if position.offset >= t.position.offset {
+	if state.segmentId == segment.id {
+		if state.offset >= t.state.offset {
 			return nil
 		}
 	} else {
-		segment = t.loadSegment(position.segmentId)
-		if position.offset >= segment.size {
-			previousId := segment.id
+		segment = t.loadSegment(state.segmentId)
+		if state.offset >= segment.size {
+			// previousId := segment.id
 			segment = t.loadSegment(segment.nextId)
-			position.segmentId = segment.id
-			position.offset = SEGMENT_HEADER_SIZE
-			t.segmentDone <- previousId
+			state.segmentId = segment.id
+			state.offset = SEGMENT_HEADER_SIZE
+			// t.segmentDone <- previousId
 		}
 	}
 
-	l := encoder.Uint32(segment.data[position.offset:])
-	start := position.offset + 4
+	l := encoder.Uint32(segment.data[state.offset:])
+	start := state.offset + 4
 	end := start + uint32(l)
 	return segment.data[start:end]
 }

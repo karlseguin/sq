@@ -10,8 +10,11 @@ import (
 )
 
 const (
-	MAX_SEGMENT_SIZE    = 256
-	SEGMENT_HEADER_SIZE = 32
+	MAX_SEGMENT_SIZE = 256
+)
+
+var (
+	SEGMENT_HEADER_SIZE = uint32(unsafe.Sizeof(Header{}))
 )
 
 type Segment struct {

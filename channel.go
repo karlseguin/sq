@@ -9,12 +9,12 @@ type Handler func(message []byte) error
 
 type Channel struct {
 	sync.Mutex
-	name     string
-	topic    *Topic
-	position *Position
-	cond     *sync.Cond
-	handler  Handler
-	waiting  int
+	name    string
+	topic   *Topic
+	state   *State
+	cond    *sync.Cond
+	handler Handler
+	waiting int
 }
 
 func newChannel(topic *Topic, name string) *Channel {
@@ -29,7 +29,7 @@ func newChannel(topic *Topic, name string) *Channel {
 func (c *Channel) Consume(handler Handler) {
 	c.handler = handler
 	for {
-		message := c.topic.read(c.position)
+		message := c.topic.read(c.state)
 		if message == nil && c.topic.align(c) {
 			break
 		}
@@ -43,7 +43,7 @@ func (c *Channel) Consume(handler Handler) {
 		}
 		c.Unlock()
 		for {
-			message := c.topic.read(c.position)
+			message := c.topic.read(c.state)
 			if message == nil {
 				panic("should not happen //todo: handle better: " + c.name)
 			}
@@ -65,7 +65,7 @@ func (c *Channel) handle(message []byte) bool {
 		time.Sleep(time.Second) //todo: better
 		return false
 	}
-	c.position.offset += uint32(len(message) + 4)
+	c.state.offset += uint32(len(message) + 4)
 	return true
 }
 
