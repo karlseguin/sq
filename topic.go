@@ -205,11 +205,9 @@ func (t *Topic) createChannel(name string) (*Channel, error) {
 		t.dataLock.RLock()
 		c.state.offset = t.state.offset
 		c.state.segmentId = t.state.segmentId
-		t.channels[name] = c
 		t.dataLock.RUnlock()
-	} else {
-		t.channels[name] = c
 	}
+	t.channels[name] = c
 	return c, nil
 }
 
