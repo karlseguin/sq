@@ -59,19 +59,24 @@ func openSegment(t *Topic, id uint64, isNew bool) *Segment {
 		file: file,
 		data: (*[MAX_SEGMENT_SIZE]byte)(unsafe.Pointer(&ref[0])),
 	}
+
 	s.Header = (*Header)(unsafe.Pointer(&s.data[0]))
+	// The size of a segment recorded in the header isn't guaranteed to be correct.
+	// We msync the data portion, not the head. Since the data portion is correct
+	// we can figure out the correct (we start from the recorded size since we
+	// know the real size is this or larger)
 	if isNew == false {
 		offset := s.size
 		for {
-			o4 := offset + 4
-			if o4 >= MAX_SEGMENT_SIZE {
+			offset4 := offset + 4
+			if offset4 >= MAX_SEGMENT_SIZE {
 				break
 			}
 			l := encoder.Uint32(s.data[offset:])
 			if l == 0 {
 				break
 			}
-			offset = l + o4
+			offset = offset4 + l
 		}
 		s.size = offset
 	}
