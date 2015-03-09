@@ -43,8 +43,8 @@ func (c *Channel) Consume(handler Handler) {
 			c.cond.Wait()
 		}
 		c.Unlock()
+		processed := 0
 		for {
-			processed := 0
 			message := c.topic.read(c)
 			if message == nil {
 				c.Lock()
