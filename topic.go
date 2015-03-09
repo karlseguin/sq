@@ -28,27 +28,28 @@ type addChannelWork struct {
 }
 
 type Topic struct {
-	sync.RWMutex
-	dataLock     sync.RWMutex
 	path         string
 	state        *State
 	states       *States
+	channelsLock sync.RWMutex
 	channels     map[string]*Channel
 	segment      *Segment
+	segmentsLock sync.RWMutex
 	segments     map[uint64]*Segment
 	addChannel   chan *addChannelWork
 	messageAdded chan struct{}
-	// segmentDone  chan uint64
-	pageSize int
+	segmentDone  chan uint64
+	pageSize     int
+	dataLock     sync.RWMutex
 }
 
 func OpenTopic(name string, config *Configuration) (*Topic, error) {
 	t := &Topic{
-		path:       path.Join(config.path, name),
-		channels:   make(map[string]*Channel),
-		segments:   make(map[uint64]*Segment),
-		addChannel: make(chan *addChannelWork),
-		// segmentDone:  make(chan uint64, 8),
+		path:         path.Join(config.path, name),
+		channels:     make(map[string]*Channel),
+		segments:     make(map[uint64]*Segment),
+		addChannel:   make(chan *addChannelWork),
+		segmentDone:  make(chan uint64, 8),
 		messageAdded: make(chan struct{}, 64),
 		pageSize:     os.Getpagesize(),
 	}
@@ -122,9 +123,14 @@ func (t *Topic) Channel(name string) (*Channel, error) {
 
 func (t *Topic) expand() {
 	segment := newSegment(t)
+	t.segmentsLock.Lock()
 	t.segments[segment.id] = segment
+	t.segmentsLock.Unlock()
 	if t.segment != nil {
+		// create a pointer to the next segment id
 		t.segment.nextId = segment.id
+		// it's possible this segment can be cleaned up (if we have no channels)
+		t.segmentDone <- t.segment.id
 	}
 	t.segment = segment
 	t.state.offset = SEGMENT_HEADER_SIZE
@@ -138,24 +144,29 @@ func (t *Topic) worker() {
 			work.channel, work.err = t.createChannel(work.name)
 			work.c <- work
 		case <-t.messageAdded:
-			t.RLock()
+			t.channelsLock.RLock()
 			for _, c := range t.channels {
-				c.notify(1)
+				c.notify()
 			}
-			t.RUnlock()
-			// case id := <-t.segmentDone:
-			// 	t.dataLock.RLock()
-			// 	usable := t.state.usable(id)
-			// 	t.dataLock.RUnlock()
-			// 	if usable == false {
-			// 		t.Lock()
-			// 		segment := t.segments[id]
-			// 		delete(t.segments, id)
-			// 		t.Unlock()
-			// 		if segment != nil {
-			// 			segment.delete() //too channels can finish with a segment at the same time
-			// 		}
-			// 	}
+			t.channelsLock.RUnlock()
+		case id := <-t.segmentDone:
+			t.dataLock.RLock()
+			// shortcircuit if this is the topic's segment
+			if id == t.segment.id {
+				t.dataLock.RUnlock()
+				break
+			}
+			usable := t.isSegmentUsable(id)
+			t.dataLock.RUnlock()
+			if usable == false {
+				t.segmentsLock.Lock()
+				segment := t.segments[id]
+				delete(t.segments, id)
+				t.segmentsLock.Unlock()
+				if segment != nil {
+					segment.delete()
+				}
+			}
 		}
 	}
 }
@@ -166,17 +177,17 @@ func (t *Topic) createChannel(name string) (*Channel, error) {
 		name = "tmp." + strconv.Itoa(rand.Int())
 		temp = true
 	}
-	t.Lock()
+	t.channelsLock.Lock()
 	_, exists := t.channels[name]
 	if exists {
-		t.Unlock()
+		t.channelsLock.Unlock()
 		if temp {
 			// try again until we've created one
 			return t.createChannel("")
 		}
 		return nil, ChannelExistsErr
 	}
-	defer t.Unlock()
+	defer t.channelsLock.Unlock()
 
 	c := newChannel(t, name)
 	if temp {
@@ -194,55 +205,42 @@ func (t *Topic) createChannel(name string) (*Channel, error) {
 		t.dataLock.RLock()
 		c.state.offset = t.state.offset
 		c.state.segmentId = t.state.segmentId
+		t.channels[name] = c
 		t.dataLock.RUnlock()
+	} else {
+		t.channels[name] = c
 	}
-	t.channels[name] = c
 	return c, nil
 }
 
-func (t *Topic) align(c *Channel) bool {
-	t.dataLock.Lock()
-	defer t.dataLock.Unlock()
-	if t.lockedRead(c.state) != nil {
-		return false
-	}
-	count := 0
-	for {
-		select {
-		case <-t.messageAdded:
-			count++
-		default:
-			t.Lock()
-			for _, c := range t.channels {
-				c.notify(count)
-			}
-			t.Unlock()
-			c.aligned()
-			return true
-		}
-	}
-}
+func (t *Topic) read(channel *Channel) []byte {
+	state := channel.state
 
-func (t *Topic) read(state *State) []byte {
+	// no need to lock the channel here since the state of the channel is only
+	// ever changed after this point (either to move to the next segment or message)
 	t.dataLock.RLock()
-	defer t.dataLock.RUnlock()
-	return t.lockedRead(state)
-}
+	isCurrentSegment := state.segmentId == t.state.segmentId
+	isCurrentOffset := state.offset == t.state.offset
+	t.dataLock.RUnlock()
 
-func (t *Topic) lockedRead(state *State) []byte {
-	segment := t.segment
-	if state.segmentId == segment.id {
-		if state.offset >= t.state.offset {
-			return nil
-		}
-	} else {
-		segment = t.loadSegment(state.segmentId)
+	// are we fully caught up with the topic?
+	if isCurrentSegment && isCurrentOffset {
+		return nil
+	}
+
+	segment := t.loadSegment(state.segmentId)
+	// If we aren't on the current segment, we might be at the end of an old
+	// segment. We can safely read old segments without locking since the only
+	// writer (the topic), is done with it
+	if !isCurrentSegment {
 		if state.offset >= segment.size {
-			// previousId := segment.id
+			previousId := state.segmentId
 			segment = t.loadSegment(segment.nextId)
+			channel.Lock()
 			state.segmentId = segment.id
 			state.offset = SEGMENT_HEADER_SIZE
-			// t.segmentDone <- previousId
+			channel.Unlock()
+			t.segmentDone <- previousId
 		}
 	}
 
@@ -253,19 +251,30 @@ func (t *Topic) lockedRead(state *State) []byte {
 }
 
 func (t *Topic) loadSegment(id uint64) *Segment {
-	t.RLock()
+	t.segmentsLock.RLock()
 	segment := t.segments[id]
-	t.RUnlock()
+	t.segmentsLock.RUnlock()
 	if segment != nil {
 		return segment
 	}
-	t.Lock()
-	defer t.Unlock()
-	segment = t.segments[id]
-	if segment != nil {
+
+	t.segmentsLock.Lock()
+	defer t.segmentsLock.Unlock()
+	if segment := t.segments[id]; segment != nil {
 		return segment
 	}
 	segment = openSegment(t, id, false)
 	t.segments[id] = segment
 	return segment
+}
+
+func (t *Topic) isSegmentUsable(id uint64) bool {
+	t.channelsLock.RLock()
+	defer t.channelsLock.RUnlock()
+	for _, channel := range t.channels {
+		if channel.isSegmentUsable(id) == true {
+			return true
+		}
+	}
+	return false
 }

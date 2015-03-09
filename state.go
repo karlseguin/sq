@@ -91,14 +91,6 @@ func (s *States) getOrCreate(name string) *State {
 		state.name[i] = r
 	}
 	s.free = s.free[1:]
+	s.channels[name] = state
 	return state
-}
-
-func (s *States) usable(segmentId uint64) bool {
-	// for _, entry := range s.entries {
-	// if s.loadPosition(offset).segmentId <= segmentId {
-	// 	return true
-	// }
-	// }
-	return false
 }

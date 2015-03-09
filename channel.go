@@ -8,7 +8,7 @@ import (
 type Handler func(message []byte) error
 
 type Channel struct {
-	sync.Mutex
+	sync.RWMutex
 	name    string
 	topic   *Topic
 	state   *State
@@ -22,18 +22,19 @@ func newChannel(topic *Topic, name string) *Channel {
 		name:  name,
 		topic: topic,
 	}
-	c.cond = &sync.Cond{L: &c.Mutex}
+	c.cond = &sync.Cond{L: &c.RWMutex}
 	return c
 }
 
 func (c *Channel) Consume(handler Handler) {
 	c.handler = handler
+	// drain existing messages
 	for {
-		message := c.topic.read(c.state)
-		if message == nil && c.topic.align(c) {
+		if message := c.topic.read(c); message != nil {
+			c.handle(message)
+		} else {
 			break
 		}
-		c.handle(message)
 	}
 
 	c.Lock()
@@ -43,21 +44,25 @@ func (c *Channel) Consume(handler Handler) {
 		}
 		c.Unlock()
 		for {
-			message := c.topic.read(c.state)
+			processed := 0
+			message := c.topic.read(c)
 			if message == nil {
-				panic("should not happen //todo: handle better: " + c.name)
-			}
-			if c.handle(message) == false {
-				continue
-			}
-			c.Lock()
-			c.waiting -= 1
-			if c.waiting == 0 {
+				c.Lock()
+				c.waiting -= processed
 				break
 			}
-			c.Unlock()
+			if c.handle(message) {
+				processed++
+			}
 		}
 	}
+}
+
+func (c *Channel) notify() {
+	c.Lock()
+	c.waiting += 1
+	c.Unlock()
+	c.cond.Signal()
 }
 
 func (c *Channel) handle(message []byte) bool {
@@ -65,19 +70,14 @@ func (c *Channel) handle(message []byte) bool {
 		time.Sleep(time.Second) //todo: better
 		return false
 	}
+	c.Lock()
 	c.state.offset += uint32(len(message) + 4)
+	c.Unlock()
 	return true
 }
 
-func (c *Channel) notify(count int) {
-	c.Lock()
-	defer c.Unlock()
-	c.waiting += count
-	c.cond.Signal()
-}
-
-func (c *Channel) aligned() {
-	c.Lock()
-	defer c.Unlock()
-	c.waiting = 0
+func (c *Channel) isSegmentUsable(id uint64) bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.state.segmentId <= id
 }
