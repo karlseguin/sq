@@ -100,3 +100,7 @@ func (s *States) syncTopic() error {
 	}
 	return nil
 }
+
+func (s *State) isSegmentUsable(id uint64) bool {
+	return s.segmentId <= id
+}

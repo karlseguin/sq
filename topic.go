@@ -272,11 +272,20 @@ func (t *Topic) loadSegment(id uint64) *Segment {
 	return segment
 }
 
+// A segment is usable if any channel references it or an earlier one
+// How we check this depends on whether or not the channel is active
+// (currently consuming message). For an active channel, we ask the channel,
+// for an inactive channel, we can query the state direclty knowing that
+// no one can be writing to it at the same time
 func (t *Topic) isSegmentUsable(id uint64) bool {
 	t.channelsLock.RLock()
 	defer t.channelsLock.RUnlock()
-	for _, channel := range t.channels {
-		if channel.isSegmentUsable(id) == true {
+	for name, state := range t.states.channels {
+		if channel, active := t.channels[name]; active {
+			if channel.isSegmentUsable(id) == true {
+				return true
+			}
+		} else if state.isSegmentUsable(id) == true {
 			return true
 		}
 	}

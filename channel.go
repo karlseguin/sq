@@ -77,7 +77,7 @@ func (c *Channel) handle(message []byte) bool {
 func (c *Channel) isSegmentUsable(id uint64) bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.state.segmentId <= id
+	return c.state.isSegmentUsable(id)
 }
 
 func (c *Channel) changeSegment(segment *Segment) {
