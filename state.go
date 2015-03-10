@@ -24,7 +24,7 @@ type States struct {
 type State struct {
 	flag      uint64
 	l         byte
-	name      [MAX_CHANNEL_NAME_SIZE]rune
+	name      [MAX_CHANNEL_NAME_SIZE]byte
 	offset    uint32
 	segmentId uint64
 }
@@ -87,9 +87,7 @@ func (s *States) getOrCreate(name string) *State {
 	}
 	state := s.free[0]
 	state.l = byte(len(name))
-	for i, r := range name {
-		state.name[i] = r
-	}
+	copy(state.name[:], name)
 	s.free = s.free[1:]
 	s.channels[name] = state
 	return state

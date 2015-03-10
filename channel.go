@@ -2,7 +2,6 @@ package garbage4
 
 import (
 	"sync"
-	"time"
 )
 
 type Handler func(message []byte) error
