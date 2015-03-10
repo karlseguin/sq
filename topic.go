@@ -243,10 +243,7 @@ func (t *Topic) read(channel *Channel) []byte {
 		if state.offset >= segment.size {
 			previousId := state.segmentId
 			segment = t.loadSegment(segment.nextId)
-			channel.Lock()
-			state.segmentId = segment.id
-			state.offset = SEGMENT_HEADER_SIZE
-			channel.Unlock()
+			channel.changeSegment(segment)
 			t.segmentDone <- previousId
 		}
 	}

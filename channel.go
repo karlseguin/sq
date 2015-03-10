@@ -79,3 +79,10 @@ func (c *Channel) isSegmentUsable(id uint64) bool {
 	defer c.RUnlock()
 	return c.state.segmentId <= id
 }
+
+func (c *Channel) changeSegment(segment *Segment) {
+	c.Lock()
+	c.state.segmentId = segment.id
+	c.state.offset = SEGMENT_HEADER_SIZE
+	c.Unlock()
+}
