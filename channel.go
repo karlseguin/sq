@@ -67,7 +67,6 @@ func (c *Channel) notify() {
 
 func (c *Channel) handle(message []byte) bool {
 	if err := c.handler(message); err != nil {
-		time.Sleep(time.Second) //todo: better
 		return false
 	}
 	c.Lock()
