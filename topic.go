@@ -3,10 +3,8 @@ package sq
 import (
 	"encoding/binary"
 	"fmt"
-	"math/rand"
 	"os"
 	"path"
-	"strconv"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -186,17 +184,11 @@ func (t *Topic) worker() {
 }
 
 func (t *Topic) createChannel(config *ChannelConfiguration) (*Channel, error) {
-	temp := false
-	if len(config.name) == 0 {
-		config.name = "tmp." + strconv.Itoa(rand.Int())
-		temp = true
-	}
 	t.channelsLock.Lock()
 	_, exists := t.channels[config.name]
 	if exists {
 		t.channelsLock.Unlock()
-		if temp {
-			config.name = ""
+		if config.temp {
 			// try again until we've created one
 			return t.createChannel(config)
 		}
@@ -205,7 +197,7 @@ func (t *Topic) createChannel(config *ChannelConfiguration) (*Channel, error) {
 	defer t.channelsLock.Unlock()
 
 	c := newChannel(t, config)
-	if temp {
+	if config.temp {
 		c.state = new(State)
 	} else {
 		c.state = t.states.getOrCreate(c.name)
@@ -216,7 +208,7 @@ func (t *Topic) createChannel(config *ChannelConfiguration) (*Channel, error) {
 
 	// if we have a temp channel, or a new channel, set the position to the
 	// writer's current position
-	if temp || c.state.segmentId == 0 {
+	if config.temp || c.state.segmentId == 0 {
 		t.dataLock.RLock()
 		c.state.offset = t.state.offset
 		c.state.segmentId = t.state.segmentId

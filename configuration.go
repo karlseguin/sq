@@ -17,6 +17,7 @@ func (c *TopicConfiguration) Path(path string) *TopicConfiguration {
 
 type ChannelConfiguration struct {
 	name      string
+	temp      bool
 	batchSize int
 }
 
@@ -26,7 +27,12 @@ func ConfigureChannel() *ChannelConfiguration {
 	}
 }
 
-func (c *ChannelConfiguration) BathSize(size uint16) *ChannelConfiguration {
+func (c *ChannelConfiguration) BatchSize(size uint16) *ChannelConfiguration {
 	c.batchSize = int(size)
+	return c
+}
+
+func (c *ChannelConfiguration) Temp() *ChannelConfiguration {
+	c.temp = true
 	return c
 }
