@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	MAX_SEGMENT_SIZE = 256
+	MAX_SEGMENT_SIZE = 16777216
 )
 
 var (
