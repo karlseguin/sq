@@ -94,8 +94,6 @@ func (t *Topic) Write(data []byte) error {
 	copy(t.segment.data[dataStart:], data)
 	// location of the next write
 	t.state.offset = uint32(dataEnd)
-	// update the size of this segment
-	t.segment.size += uint32(length + 4)
 	t.dataLock.Unlock()
 
 	// sync the part of the data file we just wrote
@@ -137,6 +135,7 @@ func (t *Topic) expand() error {
 	if t.segment != nil {
 		// create a pointer to the next segment id
 		t.segment.nextId = segment.id
+		t.segment.size = t.state.offset
 		if err := t.segment.syncHeader(); err != nil {
 			return err
 		}
@@ -285,14 +284,22 @@ func (t *Topic) isSegmentUsable(id uint64) bool {
 }
 
 // The topic's persisted state could be behind from the actual state. However,
-// we can determine the actual state based on the data which s guaranteed to be
-// up to date. Namely a segment's nextId and its size (note, the persisted size
-// also isn't necessarily correct, but openSegment fixes this)
+// we can determine the actual state based on the data which is guaranteed to be
+// up to date (the next reference id and the data itself)
 func (t *Topic) findWritePosition(segment *Segment) {
 	for segment.nextId != 0 {
 		segment = openSegment(t, segment.nextId, false)
 	}
 	t.segment = segment
 	t.state.segmentId = segment.id
-	t.state.offset = segment.size
+
+	offset := SEGMENT_HEADER_SIZE
+	for offset < MAX_SEGMENT_SIZE {
+		l := encoder.Uint32(segment.data[offset:])
+		if l == 0 {
+			break
+		}
+		offset += 4 + l
+	}
+	t.state.offset = offset
 }
