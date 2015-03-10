@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	topic, err := sq.OpenTopic("sample", sq.Configure().Path("./data/"))
+	topic, err := sq.OpenTopic("sample", sq.ConfigureTopic().Path("./data/"))
 	if err != nil {
 		panic(err)
 	}

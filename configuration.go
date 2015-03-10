@@ -1,16 +1,16 @@
 package sq
 
-type Configuration struct {
+type TopicConfiguration struct {
 	path string
 }
 
-func Configure() *Configuration {
-	return &Configuration{
+func ConfigureTopic() *TopicConfiguration {
+	return &TopicConfiguration{
 		path: "/tmp/q",
 	}
 }
 
-func (c *Configuration) Path(path string) *Configuration {
+func (c *TopicConfiguration) Path(path string) *TopicConfiguration {
 	c.path = path
 	return c
 }

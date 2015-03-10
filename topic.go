@@ -43,7 +43,7 @@ type Topic struct {
 	dataLock     sync.RWMutex
 }
 
-func OpenTopic(name string, config *Configuration) (*Topic, error) {
+func OpenTopic(name string, config *TopicConfiguration) (*Topic, error) {
 	t := &Topic{
 		path:         path.Join(config.path, name),
 		channels:     make(map[string]*Channel),
