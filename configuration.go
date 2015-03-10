@@ -1,4 +1,4 @@
-package garbage4
+package sq
 
 type Configuration struct {
 	path string

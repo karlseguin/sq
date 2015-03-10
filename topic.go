@@ -1,4 +1,4 @@
-package garbage4
+package sq
 
 import (
 	"encoding/binary"
