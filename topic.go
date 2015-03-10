@@ -61,6 +61,9 @@ func OpenTopic(name string, config *Configuration) (*Topic, error) {
 		if err := t.expand(); err != nil {
 			return nil, err
 		}
+		if err := t.states.syncTopic(); err != nil {
+			return nil, err
+		}
 	} else {
 		t.segment = openSegment(t, id, false)
 		t.segments[id] = t.segment

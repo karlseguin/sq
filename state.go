@@ -94,3 +94,11 @@ func (s *States) getOrCreate(name string) *State {
 	s.channels[name] = state
 	return state
 }
+
+func (s *States) syncTopic() error {
+	_, _, errno := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&s.data[0])), uintptr(pageSize), syscall.MS_SYNC)
+	if errno != 0 {
+		return syscall.Errno(errno)
+	}
+	return nil
+}
