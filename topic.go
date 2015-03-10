@@ -30,6 +30,7 @@ type Topic struct {
 	path         string
 	state        *State
 	states       *States
+	segmentSize  int
 	channelsLock sync.RWMutex
 	channels     map[string]*Channel
 	segment      *Segment
@@ -46,6 +47,7 @@ func OpenTopic(name string, config *TopicConfiguration) (*Topic, error) {
 		channels:     make(map[string]*Channel),
 		segments:     make(map[uint64]*Segment),
 		addChannel:   make(chan *addChannelWork),
+		segmentSize:  config.segmentSize,
 		messageAdded: make(chan struct{}, 64),
 	}
 	err := loadStates(t)
@@ -77,7 +79,7 @@ func (t *Topic) Write(data []byte) error {
 	dataEnd := dataStart + length
 
 	// do we have enough space in the current segment?
-	if dataEnd > MAX_SEGMENT_SIZE {
+	if dataEnd > t.segmentSize {
 		if err := t.expand(); err != nil {
 			return err
 		}
@@ -286,7 +288,7 @@ func (t *Topic) findWritePosition(segment *Segment) {
 	t.state.segmentId = segment.id
 
 	offset := SEGMENT_HEADER_SIZE
-	for offset < MAX_SEGMENT_SIZE {
+	for offset < uint32(t.segmentSize) {
 		l := encoder.Uint32(segment.data[offset:])
 		if l == 0 {
 			break

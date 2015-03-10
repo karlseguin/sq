@@ -9,20 +9,14 @@ import (
 	"unsafe"
 )
 
-const (
-	// MAX_SEGMENT_SIZE = 16777216
-	MAX_SEGMENT_SIZE = 256
-)
-
 var (
 	SEGMENT_HEADER_SIZE = uint32(unsafe.Sizeof(Header{}))
 )
 
 type Segment struct {
 	*Header
-	ref  []byte
+	data []byte
 	file *os.File
-	data *[MAX_SEGMENT_SIZE]byte
 }
 
 type Header struct {
@@ -47,17 +41,16 @@ func openSegment(t *Topic, id uint64, isNew bool) *Segment {
 		panic(err)
 	}
 	if isNew {
-		file.Truncate(MAX_SEGMENT_SIZE)
+		file.Truncate(int64(t.segmentSize))
 	}
-	ref, err := syscall.Mmap(int(file.Fd()), 0, MAX_SEGMENT_SIZE, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	data, err := syscall.Mmap(int(file.Fd()), 0, t.segmentSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
 		panic(err)
 	}
 
 	s := &Segment{
-		ref:  ref,
 		file: file,
-		data: (*[MAX_SEGMENT_SIZE]byte)(unsafe.Pointer(&ref[0])),
+		data: data,
 	}
 	s.Header = (*Header)(unsafe.Pointer(&s.data[0]))
 	return s
@@ -72,8 +65,8 @@ func (s *Segment) syncHeader() error {
 }
 
 func (s *Segment) delete() {
-	syscall.Munmap(s.ref)
+	syscall.Munmap(s.data)
 	s.file.Close()
-	s.data, s.ref = nil, nil
+	s.data = nil
 	os.Remove(s.file.Name())
 }
