@@ -139,11 +139,12 @@ func (t *Topic) expand() error {
 		if err := t.segment.syncHeader(); err != nil {
 			return err
 		}
-		previousId := t.segment.id
-		go func() {
-			// it's possible this segment can be cleaned up (if we have no channels)
-			t.segmentDone <- previousId
-		}()
+		t.channelsLock.RLock()
+		noChannels := len(t.states.channels) == 0
+		t.channelsLock.RUnlock()
+		if noChannels {
+			t.deleteSegment(t.segment.id)
+		}
 	}
 	t.segment = segment
 	t.state.offset = SEGMENT_HEADER_SIZE
@@ -173,13 +174,7 @@ func (t *Topic) worker() {
 			usable := t.isSegmentUsable(id)
 			t.dataLock.RUnlock()
 			if usable == false {
-				t.segmentsLock.Lock()
-				segment := t.segments[id]
-				delete(t.segments, id)
-				t.segmentsLock.Unlock()
-				if segment != nil {
-					segment.delete()
-				}
+				t.deleteSegment(id)
 			}
 		}
 	}
@@ -311,4 +306,14 @@ func (t *Topic) findWritePosition(segment *Segment) {
 		offset += 4 + l
 	}
 	t.state.offset = offset
+}
+
+func (t *Topic) deleteSegment(id uint64) {
+	t.segmentsLock.Lock()
+	segment := t.segments[id]
+	delete(t.segments, id)
+	t.segmentsLock.Unlock()
+	if segment != nil {
+		segment.delete()
+	}
 }
