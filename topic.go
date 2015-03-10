@@ -37,7 +37,6 @@ type Topic struct {
 	segments     map[uint64]*Segment
 	addChannel   chan *addChannelWork
 	messageAdded chan struct{}
-	segmentDone  chan uint64
 	dataLock     sync.RWMutex
 }
 
@@ -47,7 +46,6 @@ func OpenTopic(name string, config *TopicConfiguration) (*Topic, error) {
 		channels:     make(map[string]*Channel),
 		segments:     make(map[uint64]*Segment),
 		addChannel:   make(chan *addChannelWork),
-		segmentDone:  make(chan uint64, 2),
 		messageAdded: make(chan struct{}, 64),
 	}
 	err := loadStates(t)
@@ -164,18 +162,6 @@ func (t *Topic) worker() {
 				c.notify()
 			}
 			t.channelsLock.RUnlock()
-		case id := <-t.segmentDone:
-			t.dataLock.RLock()
-			// shortcircuit if this is the topic's segment
-			if id == t.segment.id {
-				t.dataLock.RUnlock()
-				break
-			}
-			usable := t.isSegmentUsable(id)
-			t.dataLock.RUnlock()
-			if usable == false {
-				t.deleteSegment(id)
-			}
 		}
 	}
 }
@@ -239,7 +225,9 @@ func (t *Topic) read(channel *Channel) []byte {
 			previousId := state.segmentId
 			segment = t.loadSegment(segment.nextId)
 			channel.changeSegment(segment)
-			t.segmentDone <- previousId
+			if t.isSegmentUsable(previousId) == false {
+				t.deleteSegment(previousId)
+			}
 		}
 	}
 
