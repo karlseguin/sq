@@ -47,7 +47,7 @@ func OpenTopic(name string, config *TopicConfiguration) (*Topic, error) {
 		channels:     make(map[string]*Channel),
 		segments:     make(map[uint64]*Segment),
 		addChannel:   make(chan *addChannelWork),
-		segmentDone:  make(chan uint64, 8),
+		segmentDone:  make(chan uint64, 2),
 		messageAdded: make(chan struct{}, 64),
 	}
 	err := loadStates(t)
@@ -139,8 +139,11 @@ func (t *Topic) expand() error {
 		if err := t.segment.syncHeader(); err != nil {
 			return err
 		}
-		// it's possible this segment can be cleaned up (if we have no channels)
-		t.segmentDone <- t.segment.id
+		previousId := t.segment.id
+		go func() {
+			// it's possible this segment can be cleaned up (if we have no channels)
+			t.segmentDone <- previousId
+		}()
 	}
 	t.segment = segment
 	t.state.offset = SEGMENT_HEADER_SIZE
