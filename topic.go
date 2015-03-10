@@ -65,7 +65,7 @@ func OpenTopic(name string, config *Configuration) (*Topic, error) {
 			return nil, err
 		}
 	} else {
-		t.segment = openSegment(t, id, false)
+		t.findWritePosition(openSegment(t, id, false))
 		t.segments[id] = t.segment
 	}
 	go t.worker()
@@ -285,4 +285,17 @@ func (t *Topic) isSegmentUsable(id uint64) bool {
 		}
 	}
 	return false
+}
+
+// The topic's persisted state could be behind from the actual state. However,
+// we can determine the actual state based on the data which s guaranteed to be
+// up to date. Namely a segment's nextId and its size (note, the persisted size
+// also isn't necessarily correct, but openSegment fixes this)
+func (t *Topic) findWritePosition(segment *Segment) {
+	for segment.nextId != 0 {
+		segment = openSegment(t, segment.nextId, false)
+	}
+	t.segment = segment
+	t.state.segmentId = segment.id
+	t.state.offset = segment.size
 }
