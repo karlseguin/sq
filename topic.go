@@ -18,6 +18,7 @@ var (
 	ChannelNameLenErr = fmt.Errorf("channel name cannot exceed %d characters", MAX_CHANNEL_NAME_SIZE)
 	ChannelExistsErr  = fmt.Errorf("channel already exists")
 	ChannelCreateErr  = fmt.Errorf("channel count not be created")
+	pageSize          = os.Getpagesize()
 )
 
 type addChannelWork struct {
@@ -39,7 +40,6 @@ type Topic struct {
 	addChannel   chan *addChannelWork
 	messageAdded chan struct{}
 	segmentDone  chan uint64
-	pageSize     int
 	dataLock     sync.RWMutex
 }
 
@@ -51,7 +51,6 @@ func OpenTopic(name string, config *Configuration) (*Topic, error) {
 		addChannel:   make(chan *addChannelWork),
 		segmentDone:  make(chan uint64, 8),
 		messageAdded: make(chan struct{}, 64),
-		pageSize:     os.Getpagesize(),
 	}
 	err := loadStates(t)
 	if err != nil {
@@ -59,7 +58,9 @@ func OpenTopic(name string, config *Configuration) (*Topic, error) {
 	}
 
 	if id := t.state.segmentId; id == 0 {
-		t.expand()
+		if err := t.expand(); err != nil {
+			return nil, err
+		}
 	} else {
 		t.segment = openSegment(t, id, false)
 		t.segments[id] = t.segment
@@ -78,7 +79,9 @@ func (t *Topic) Write(data []byte) error {
 
 	// do we have enough space in the current segment?
 	if dataEnd > MAX_SEGMENT_SIZE {
-		t.expand()
+		if err := t.expand(); err != nil {
+			return err
+		}
 		start = int(SEGMENT_HEADER_SIZE)
 		dataStart = start + 4
 		dataEnd = dataStart + length
@@ -95,7 +98,7 @@ func (t *Topic) Write(data []byte) error {
 	t.dataLock.Unlock()
 
 	// sync the part of the data file we just wrote
-	from := start / t.pageSize * t.pageSize
+	from := start / pageSize * pageSize
 	to := dataStart + length - from
 	_, _, errno := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&t.segment.data[from])), uintptr(to), syscall.MS_SYNC)
 	if errno != 0 {
@@ -121,7 +124,7 @@ func (t *Topic) Channel(name string) (*Channel, error) {
 	return res.channel, res.err
 }
 
-func (t *Topic) expand() {
+func (t *Topic) expand() error {
 	segment := newSegment(t)
 	t.segmentsLock.Lock()
 	t.segments[segment.id] = segment
@@ -129,12 +132,16 @@ func (t *Topic) expand() {
 	if t.segment != nil {
 		// create a pointer to the next segment id
 		t.segment.nextId = segment.id
+		if err := t.segment.syncHeader(); err != nil {
+			return err
+		}
 		// it's possible this segment can be cleaned up (if we have no channels)
 		t.segmentDone <- t.segment.id
 	}
 	t.segment = segment
 	t.state.offset = SEGMENT_HEADER_SIZE
 	t.state.segmentId = segment.id
+	return nil
 }
 
 func (t *Topic) worker() {

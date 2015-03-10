@@ -83,6 +83,14 @@ func openSegment(t *Topic, id uint64, isNew bool) *Segment {
 	return s
 }
 
+func (s *Segment) syncHeader() error {
+	_, _, errno := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&s.data[0])), uintptr(pageSize), syscall.MS_SYNC)
+	if errno != 0 {
+		return syscall.Errno(errno)
+	}
+	return nil
+}
+
 func (s *Segment) delete() {
 	syscall.Munmap(s.ref)
 	s.file.Close()
