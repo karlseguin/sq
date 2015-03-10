@@ -27,7 +27,7 @@ type Segment struct {
 type Header struct {
 	version uint32
 	flag    uint32
-	size    uint32 //PADDED
+	size    uint32
 	id      uint64
 	nextId  uint64
 }
