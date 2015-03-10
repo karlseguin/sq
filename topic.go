@@ -23,8 +23,8 @@ var (
 
 type addChannelWork struct {
 	err     error
-	name    string
 	channel *Channel
+	config  *ChannelConfiguration
 	c       chan *addChannelWork
 }
 
@@ -114,13 +114,17 @@ func (t *Topic) Write(data []byte) error {
 	return nil
 }
 
-func (t *Topic) Channel(name string) (*Channel, error) {
+func (t *Topic) Channel(name string, config *ChannelConfiguration) (*Channel, error) {
 	if len(name) > MAX_CHANNEL_NAME_SIZE {
 		return nil, ChannelNameLenErr
 	}
+	if config == nil {
+		config = ConfigureChannel()
+	}
+	config.name = name
 	res := &addChannelWork{
-		name: name,
-		c:    make(chan *addChannelWork),
+		c:      make(chan *addChannelWork),
+		config: config,
 	}
 	t.addChannel <- res
 	<-res.c
@@ -151,7 +155,7 @@ func (t *Topic) worker() {
 	for {
 		select {
 		case work := <-t.addChannel:
-			work.channel, work.err = t.createChannel(work.name)
+			work.channel, work.err = t.createChannel(work.config)
 			work.c <- work
 		case <-t.messageAdded:
 			t.channelsLock.RLock()
@@ -181,29 +185,30 @@ func (t *Topic) worker() {
 	}
 }
 
-func (t *Topic) createChannel(name string) (*Channel, error) {
+func (t *Topic) createChannel(config *ChannelConfiguration) (*Channel, error) {
 	temp := false
-	if len(name) == 0 {
-		name = "tmp." + strconv.Itoa(rand.Int())
+	if len(config.name) == 0 {
+		config.name = "tmp." + strconv.Itoa(rand.Int())
 		temp = true
 	}
 	t.channelsLock.Lock()
-	_, exists := t.channels[name]
+	_, exists := t.channels[config.name]
 	if exists {
 		t.channelsLock.Unlock()
 		if temp {
+			config.name = ""
 			// try again until we've created one
-			return t.createChannel("")
+			return t.createChannel(config)
 		}
 		return nil, ChannelExistsErr
 	}
 	defer t.channelsLock.Unlock()
 
-	c := newChannel(t, name)
+	c := newChannel(t, config)
 	if temp {
 		c.state = new(State)
 	} else {
-		c.state = t.states.getOrCreate(name)
+		c.state = t.states.getOrCreate(c.name)
 		if c.state == nil {
 			return nil, ChannelCreateErr
 		}
@@ -217,7 +222,7 @@ func (t *Topic) createChannel(name string) (*Channel, error) {
 		c.state.segmentId = t.state.segmentId
 		t.dataLock.RUnlock()
 	}
-	t.channels[name] = c
+	t.channels[c.name] = c
 	return c, nil
 }
 

@@ -16,10 +16,10 @@ type Channel struct {
 	waiting int
 }
 
-func newChannel(topic *Topic, name string) *Channel {
+func newChannel(topic *Topic, config *ChannelConfiguration) *Channel {
 	c := &Channel{
-		name:  name,
 		topic: topic,
+		name:  config.name,
 	}
 	c.cond = &sync.Cond{L: &c.RWMutex}
 	return c

@@ -17,7 +17,7 @@ func main() {
 		panic(err)
 	}
 	go func() {
-		channel, err := topic.Channel("channel-1")
+		channel, err := topic.Channel("channel-1", sq.ConfigureChannel())
 		if err != nil {
 			panic(err)
 		}
