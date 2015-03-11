@@ -3,6 +3,7 @@ package sq
 import (
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"path"
 	"sync"
@@ -11,7 +12,7 @@ import (
 )
 
 const (
-	MESSAGE_OVERHEAD = 5 //length + termination
+	MESSAGE_OVERHEAD = 8 //length + crc32
 )
 
 var (
@@ -80,35 +81,37 @@ func (t *Topic) Write(data []byte) error {
 
 	t.dataLock.Lock()
 	start := int(t.state.offset)
-	dataStart := start + 4
+	dataStart := start + MESSAGE_OVERHEAD
 	dataEnd := dataStart + length
 
 	// do we have enough space in the current segment?
 	if dataEnd > t.segmentSize {
-		if length+MESSAGE_OVERHEAD+int(SEGMENT_HEADER_SIZE) > t.segmentSize {
+		if length+dataStart+int(SEGMENT_HEADER_SIZE) > t.segmentSize {
 			return MessageTooLargeErr
 		}
 		if err := t.expand(); err != nil {
 			return err
 		}
 		start = int(SEGMENT_HEADER_SIZE)
-		dataStart = start + 4
+		dataStart = start + MESSAGE_OVERHEAD
 		dataEnd = dataStart + length
 	}
 
 	// write the message length
 	encoder.PutUint32(t.segment.data[start:], uint32(length))
+	// write the message's crc
+	encoder.PutUint32(t.segment.data[start+4:], crc32.ChecksumIEEE(data))
 	// write the message
 	copy(t.segment.data[dataStart:], data)
-	t.segment.data[dataEnd] = 255
+
 	// location of the next write
-	t.state.offset = uint32(dataEnd) + 1
+	t.state.offset = uint32(dataEnd)
 	segment := t.segment
 	t.dataLock.Unlock()
 
 	// sync the part of the data file we just wrote
 	from := start / pageSize * pageSize
-	to := dataStart + length + 1 - from
+	to := dataStart + length - from
 	_, _, errno := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&segment.data[from])), uintptr(to), syscall.MS_SYNC)
 	if errno != 0 {
 		return syscall.Errno(errno)
@@ -244,7 +247,7 @@ func (t *Topic) read(channel *Channel) []byte {
 	}
 
 	l := encoder.Uint32(segment.data[state.offset:])
-	start := state.offset + 4
+	start := state.offset + MESSAGE_OVERHEAD
 	end := start + uint32(l)
 	return segment.data[start:end]
 }
@@ -303,7 +306,9 @@ func (t *Topic) findWritePosition(segment *Segment) {
 		if l == 0 {
 			break
 		}
-		if segment.data[offset+l+4] != 255 {
+		hash := encoder.Uint32(segment.data[offset+4:])
+		dataStart := offset + 8
+		if hash != crc32.ChecksumIEEE(segment.data[dataStart:dataStart+l]) {
 			break
 		}
 		offset += l + MESSAGE_OVERHEAD
