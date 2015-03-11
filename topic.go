@@ -103,12 +103,13 @@ func (t *Topic) Write(data []byte) error {
 	t.segment.data[dataEnd] = 255
 	// location of the next write
 	t.state.offset = uint32(dataEnd) + 1
+	segment := t.segment
 	t.dataLock.Unlock()
 
 	// sync the part of the data file we just wrote
 	from := start / pageSize * pageSize
 	to := dataStart + length + 1 - from
-	_, _, errno := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&t.segment.data[from])), uintptr(to), syscall.MS_SYNC)
+	_, _, errno := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&segment.data[from])), uintptr(to), syscall.MS_SYNC)
 	if errno != 0 {
 		return syscall.Errno(errno)
 	}
