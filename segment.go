@@ -31,6 +31,7 @@ func newSegment(t *Topic) *Segment {
 	id := uint64(time.Now().UnixNano())
 	segment := openSegment(t, id, true)
 	segment.id = id
+	segment.syncHeader()
 	return segment
 }
 
