@@ -10,6 +10,10 @@ import (
 	"unsafe"
 )
 
+const (
+	MESSAGE_OVERHEAD = 5 //length + termination
+)
+
 var (
 	encoder            = binary.LittleEndian
 	blank              = struct{}{}
@@ -81,7 +85,7 @@ func (t *Topic) Write(data []byte) error {
 
 	// do we have enough space in the current segment?
 	if dataEnd > t.segmentSize {
-		if length+int(SEGMENT_HEADER_SIZE) > t.segmentSize {
+		if length+MESSAGE_OVERHEAD+int(SEGMENT_HEADER_SIZE) > t.segmentSize {
 			return MessageTooLargeErr
 		}
 		if err := t.expand(); err != nil {
@@ -96,13 +100,14 @@ func (t *Topic) Write(data []byte) error {
 	encoder.PutUint32(t.segment.data[start:], uint32(length))
 	// write the message
 	copy(t.segment.data[dataStart:], data)
+	t.segment.data[dataEnd] = 255
 	// location of the next write
-	t.state.offset = uint32(dataEnd)
+	t.state.offset = uint32(dataEnd) + 1
 	t.dataLock.Unlock()
 
 	// sync the part of the data file we just wrote
 	from := start / pageSize * pageSize
-	to := dataStart + length - from
+	to := dataStart + length + 1 - from
 	_, _, errno := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&t.segment.data[from])), uintptr(to), syscall.MS_SYNC)
 	if errno != 0 {
 		return syscall.Errno(errno)
@@ -297,7 +302,10 @@ func (t *Topic) findWritePosition(segment *Segment) {
 		if l == 0 {
 			break
 		}
-		offset += 4 + l
+		if segment.data[offset+l+4] != 255 {
+			break
+		}
+		offset += l + MESSAGE_OVERHEAD
 	}
 	t.state.offset = offset
 }

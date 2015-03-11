@@ -69,7 +69,7 @@ func (c *Channel) handle(message []byte) bool {
 		return false
 	}
 	c.Lock()
-	c.state.offset += uint32(len(message) + 4)
+	c.state.offset += uint32(len(message) + MESSAGE_OVERHEAD)
 	c.Unlock()
 	return true
 }
