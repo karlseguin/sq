@@ -11,12 +11,13 @@ import (
 )
 
 var (
-	encoder           = binary.LittleEndian
-	blank             = struct{}{}
-	ChannelNameLenErr = fmt.Errorf("channel name cannot exceed %d characters", MAX_CHANNEL_NAME_SIZE)
-	ChannelExistsErr  = fmt.Errorf("channel already exists")
-	ChannelCreateErr  = fmt.Errorf("channel count not be created")
-	pageSize          = os.Getpagesize()
+	encoder            = binary.LittleEndian
+	blank              = struct{}{}
+	ChannelNameLenErr  = fmt.Errorf("channel name cannot exceed %d characters", MAX_CHANNEL_NAME_SIZE)
+	ChannelExistsErr   = fmt.Errorf("channel already exists")
+	ChannelCreateErr   = fmt.Errorf("channel count not be created")
+	MessageTooLargeErr = fmt.Errorf("message too large")
+	pageSize           = os.Getpagesize()
 )
 
 type addChannelWork struct {
@@ -80,6 +81,9 @@ func (t *Topic) Write(data []byte) error {
 
 	// do we have enough space in the current segment?
 	if dataEnd > t.segmentSize {
+		if length+int(SEGMENT_HEADER_SIZE) > t.segmentSize {
+			return MessageTooLargeErr
+		}
 		if err := t.expand(); err != nil {
 			return err
 		}
