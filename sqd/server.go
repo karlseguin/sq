@@ -24,9 +24,9 @@ func Listen(config *Configuration) {
 }
 
 func handler(conn net.Conn, server *Server) {
-	client := ClientFactory(conn, server)
-	if client != nil {
-		client.Run()
+	handler := HandlerFactory(conn, server)
+	if handler != nil {
+		handler.Run()
 	}
 }
 
