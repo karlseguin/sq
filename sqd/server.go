@@ -18,13 +18,15 @@ func Listen(config *Configuration) {
 		if conn, err := socket.Accept(); err != nil {
 			log.Println("socket access", err)
 		} else {
-			go func() {
-				client := ClientFactory(conn, server)
-				if client != nil {
-					client.Run()
-				}
-			}()
+			go handler(conn, server)
 		}
+	}
+}
+
+func handler(conn net.Conn, server *Server) {
+	client := ClientFactory(conn, server)
+	if client != nil {
+		client.Run()
 	}
 }
 
